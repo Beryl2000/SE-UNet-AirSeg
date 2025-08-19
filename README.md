@@ -1,6 +1,27 @@
-# Airway Tree Parsing
+# Progressive Curriculum Learning with Scale-Enhanced U-Net for Continuous Airway Segmentation
 
-This repository contains the code for airway tree parsing and the comparison results of the algorithms. Two algorithms are used: **Ours** and **ATM22**(https://github.com/EndoluminalSurgicalVision-IMR/ATM-22-Related-Work/tree/main/evaluation). The goal of the project is to parse the segmented airway tree structures from lung CT scans into meaningful representations. This allows for the evaluation of tree length and branching numbers of segmentation algorithms and provides support for clinical analysis.
+
+This repository provides the implementation of our paper:  
+**Progressive Curriculum Learning with Scale-Enhanced U-Net for Continuous Airway Segmentation**  
+[arXiv link](https://arxiv.org/abs/2410.18456)
+
+Continuous and accurate segmentation of airways in chest CT images is crucial for preoperative planning and real-time bronchoscopy navigation. This project contains the codebase for our progressive curriculum learning pipeline, the Scale-Enhanced U-Net (SE-UNet), and airway tree parsing and evaluation.
+
+> ⚠️ **Note**: Currently, this repository includes the released code for **airway tree parsing**.  
+> The **training, validation, and testing code** for the full airway segmentation pipeline (SE-UNet with progressive curriculum learning and ATRL loss) will be uploaded and continuously updated.
+
+---
+
+## Airway Tree Parsing
+
+The airway tree parsing module provides code for extracting centerlines, parsing airway structures, and evaluating tree length/branching. We compare our method against the widely used **ATM22** approach.  
+
+Two algorithms are provided:
+- **Ours**
+- **ATM22** (official code: [ATM-22-Related-Work](https://github.com/EndoluminalSurgicalVision-IMR/ATM-22-Related-Work/tree/main/evaluation))
+
+Parsing the airway tree structures from lung CT masks enables evaluation of branch connectivity, tree length, and other clinically meaningful indices.
+
 
 ## Requirements
 
