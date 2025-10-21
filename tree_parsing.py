@@ -240,7 +240,6 @@ if __name__ == '__main__':
     save_ATM22_path = args.save_ATM22_path
     merge_t = args.merge_t
 
-
     # pred_mask_path = './demo_mask/'
     # save_path ='./demo_output_Ours/'
     # save_ATM22_path = './demo_output_ATM22/'
