@@ -275,10 +275,10 @@ class AirwayHMData(Dataset):
         self.hard_ratio = 0.3
 
         # scheduler 
-        self.decay_step = 5          # 每 5 epoch 调整一次
-        self.decay_rate = 0.05         # 每次 Hard 比例增加 10%
-        self.max_hard_ratio = 0.8     # 上限
-        self.min_hard_ratio = 0.2     # 下限
+        self.decay_step = 5          
+        self.decay_rate = 0.05        
+        self.max_hard_ratio = 0.8     
+        self.min_hard_ratio = 0.2    
 
     def __len__(self):
         return len(self.file_list)
@@ -421,14 +421,14 @@ class AirwayHMData3(Dataset):
         self.cube_size = cube_size
         self.aug_flag = aug_flag
 
-        self.hard_ratio = 0.8       # Hard + Break 总体比例
-        self.break_ratio = 0.625    # Hard 内 Break占比（0.5 / 0.8）
-        self.min_hard_ratio = 0.2
-        self.max_hard_ratio = 0.8
+        self.hard_ratio = 0.8      
+        self.break_ratio = 0.625   
+        self.min_hard_ratio = 0.1
+        self.max_hard_ratio = 0.9
         self.min_break_ratio = 0.2
         self.max_break_ratio = 0.8
         self.decay_rate = 0.05
-        self.decay_step = 5        # 每10 epoch更新一次
+        self.decay_step = 1       
 
     def __len__(self):
         return len(self.file_list)

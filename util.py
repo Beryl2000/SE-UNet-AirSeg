@@ -163,3 +163,4 @@ def large_connected_domain26(label):
     label = (cd == (volume_sort[-1] + 1)).astype(np.uint8)
     label = ndimage.binary_fill_holes(label)
     label = label.astype(np.uint8)
+    return label
