@@ -42,7 +42,7 @@ python tree_parsing.py --pred_mask_path ./demo_mask/ --save_ATM22_path ./demo_ou
 ```
 This command will load predicted mask files from `./demo_mask/` and save the processed results to `./demo_output_ATM22/`.
 
-## Results
+<!-- ## Results
 
 The following table provides a detailed comparison of our method with the widely-used ATM22 challenge method on the demo data:
 
@@ -74,7 +74,7 @@ The following table provides a detailed comparison of our method with the widely
 </div>
 
 
-It is evident that the airway tree parsing method from the ATM22 challenge is not only inefficient but also generates inaccurate airway segmentations. In contrast, our method delivers results that are both efficient and reliable.
+It is evident that the airway tree parsing method from the ATM22 challenge is not only inefficient but also generates inaccurate airway segmentations. In contrast, our method delivers results that are both efficient and reliable. -->
 
 ## Citation
 
