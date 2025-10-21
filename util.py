@@ -4,6 +4,7 @@ import random
 import cc3d
 from scipy.ndimage.morphology import binary_fill_holes
 import SimpleITK as sitk
+import pynvml
 
 
 def load_itk_image(filename):
@@ -71,3 +72,19 @@ def maximum_3d(region01):
     max_region01 = binary_fill_holes(max_region01)
 
     return max_region01
+
+
+def get_gpu_mem_info(gpu_id=0):
+
+    pynvml.nvmlInit()
+    if gpu_id < 0 or gpu_id >= pynvml.nvmlDeviceGetCount():
+        print(r'gpu_id {} not exist!'.format(gpu_id))
+        return 0, 0, 0
+
+    handler = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+    meminfo = pynvml.nvmlDeviceGetMemoryInfo(handler)
+    total = round(meminfo.total / 1024 / 1024, 2)
+    used = round(meminfo.used / 1024 / 1024, 2)
+    free = round(meminfo.free / 1024 / 1024, 2)
+    # return total, used, free
+    return free

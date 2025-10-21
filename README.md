@@ -1,46 +1,112 @@
-# Airway Tree Parsing
+#  Scale-Enhanced U-Net (SE-UNet)
 
-This repository contains the code for airway tree parsing and the comparison results of the algorithms. Two algorithms are used: **Ours** and **ATM22**(https://github.com/EndoluminalSurgicalVision-IMR/ATM-22-Related-Work/tree/main/evaluation). The goal of the project is to parse the segmented airway tree structures from lung CT scans into meaningful representations. This allows for the evaluation of tree length and branching numbers of segmentation algorithms and provides support for clinical analysis.
+This repository provides the official implementation for the paper:  
+**"Progressive Curriculum Learning with Scale-Enhanced U-Net for Continuous Airway Segmentation"**  
+by *Bingyu Yang, Qingyao Tian, Huai Liao, Xinyan Huang, Jinlin Wu, Jingdi Hu, and Hongbin Liu*.
 
-## Requirements
+> This work proposes a **Progressive Curriculum Learning** framework combined with a **Scale-Enhanced U-Net (SE-UNet)** to achieve **continuous and topology-preserving airway segmentation** from chest CT scans.  
+> The model addresses the intra-class imbalance between large and small bronchial branches and the difficulty of segmenting blurred airway structures.  
+> Our method introduces a **three-stage curriculum strategy** and **scale-enhanced feature aggregation**, significantly improving small-airway detection and overall airway continuity.  
+---
 
-- Python 3.11.10
-- `numpy`
-- `scipy`
-- `pyvista`
-- `skimage`
-- `SimpleITK`
-- `cc3d`
+## ⚙️ Installation
 
-You can install the necessary packages via pip:
+### Create environment
+```bash
+conda env create -f environment.yml
+conda activate seunet
+```
 
+### Or install manually
 ```bash
 pip install -r requirements.txt
 ```
 
-## Code
+Required packages include: `torch`, `numpy`, `scipy`, `SimpleITK`, `scikit-image`, `pyvista`, and `cc3d`.
 
-First, place the mask of the airway tree that needs to be parsed in the folder `./demo_mask/` in the `.nii.gz` format.
+---
 
-1. Run ours_skel_parse Only
+## 📘 Overview
 
-To run only ours_skel_parse and save the output, use the following command:
+- **Progressive Curriculum Learning:**  
+  Three-stage training from coarse to fine airway segmentation.
 
+- **Scale-Enhanced U-Net (SE-UNet):**  
+  Multi-scale encoder–decoder with feature enhancement and detail injection modules.
+
+- **Airway Tree Parsing:**  
+  Post-processing stage reconstructing 3D topology for branch-level analysis.
+
+---
+
+## 🧩 Main Pipeline
+
+### Step-by-step Usage
+
+1. **Preprocess the dataset**
+   ```bash
+   python preprocessing.py
+   ```
+   Perform CT data normalization, cropping, and initial cleaning.
+
+2. **Generate dataset split and config**
+   ```bash
+   python write_json.py
+   ```
+   Create training/validation/test split and JSON configuration files.
+
+3. **Compute prior weights**
+   ```bash
+   python LIB_weight.py
+   ```
+   Calculate local-size-based airway prior weights. Results are stored in `./data/LIB_weight`.
+
+4. **Skeleton and parsing**
+   ```bash
+   python ske_and_parse.py
+   ```
+   Extract skeletons and perform branch parsing. Results are saved to `./data/tree_parse(_val/_test)` and `./data/skeleton(_val/_test)`.
+
+5. **Progressive three-stage training**
+   ```bash
+   python train.py
+   ```
+   - Stage 1: Train on coarse airway structures → outputs `./data/pred_1`  
+   - Stage 2: Train with refined small-airway weighting → outputs `./data/pred_2`, `./data/BR_weight`, `./data/br_skel`  
+   - Stage 3: Final continuity refinement training.
+
+6. **Testing**
+   ```bash
+   python test.py
+   ```
+   Evaluate the final model on the test set using the best checkpoint.
+
+7. **Prediction / Deployment**
+   ```bash
+   python prediction.py
+   ```
+   Deploy trained models for clinical inference.
+
+---
+
+## 🌲 Airway Tree Parsing
+
+This module analyzes segmented airway structures to obtain topology metrics such as total length, number of branches, and connectivity.
+
+Two parsing algorithms are included: **Ours** and **ATM’22** ([ATM22 repo](https://github.com/EndoluminalSurgicalVision-IMR/ATM-22-Related-Work/tree/main/evaluation)).
+
+### Run Ours
 ```bash
 python tree_parsing.py --pred_mask_path ./demo_mask/ --save_path ./demo_output_Ours/ --merge_t 5
 ```
-This command will load predicted mask files from `./demo_mask/` and save the processed results to `./demo_output_Ours/`.`--merge_t`: Threshold for merging branches during airway skeleton parsing (default: 5).
 
-
-2. Run atm22_skel_parse Only
-
-To run only atm22_skel_parse and save the output, use the following command:
-
+### Run ATM22
 ```bash
 python tree_parsing.py --pred_mask_path ./demo_mask/ --save_ATM22_path ./demo_output_ATM22/
-
 ```
-This command will load predicted mask files from `./demo_mask/` and save the processed results to `./demo_output_ATM22/`.
+
+---
+
 
 <!-- ## Results
 
@@ -76,7 +142,7 @@ The following table provides a detailed comparison of our method with the widely
 
 It is evident that the airway tree parsing method from the ATM22 challenge is not only inefficient but also generates inaccurate airway segmentations. In contrast, our method delivers results that are both efficient and reliable. -->
 
-## Citation
+## 🧠 Citation
 
 If you use this project in your research, please cite the following papers:
 
