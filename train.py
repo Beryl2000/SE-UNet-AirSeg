@@ -38,7 +38,7 @@ def double_threshold_iteration(pred, h_thresh, l_thresh):
             for j in range(w):
                 for k in range(z):
                     if gbin[i][j][k] == 0 and pred[i][j][k] < h_thresh*255 and pred[i][j][k] >= l_thresh*255:
-                        for n in range(0, 26):  # 26领域
+                        for n in range(0, 26):  
                             inn = i + neigb[n, 0]
                             jnn = j + neigb[n, 1]
                             knn = k + neigb[n, 2]
@@ -239,7 +239,7 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
 
             break_loss = atr_loss(pred_en, label, skel, weight) + atr_loss(
                 pred_de, label, skel, weight)
-            loss =  dice_loss_de * 1 + dice_loss_en * 0.5 + break_loss * 0.5  #混合loss
+            loss =  dice_loss_de * 1 + dice_loss_en * 0.5 + break_loss * 0.5  
 
             optimizer.zero_grad()
             loss.backward()

@@ -481,7 +481,7 @@ def merging(branch_dict, len_thre):
     return branch_dict
 
 def remerging(branch_dict,branch_dict_g,remerge_l): 
-    #大
+    
     cut_l=np.zeros(len(remerge_l),dtype=int)+1000
     t=np.zeros(len(remerge_l),dtype=int)+1000
     flag=np.zeros(len(remerge_l),dtype=int)

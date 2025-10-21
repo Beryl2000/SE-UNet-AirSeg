@@ -31,7 +31,7 @@ def double_threshold_iteration(pred, h_thresh, l_thresh):
             for j in range(w):
                 for k in range(z):
                     if gbin[i][j][k] == 0 and pred[i][j][k] < h_thresh*255 and pred[i][j][k] >= l_thresh*255:
-                        for n in range(0, 26):  # 26领域
+                        for n in range(0, 26):  
                             inn = i + neigb[n, 0]
                             jnn = j + neigb[n, 1]
                             knn = k + neigb[n, 2]
@@ -100,7 +100,7 @@ def test(data_root, model_stage, best_epoch, testlog_savepath, result_savepath,
     h_thresh = 0.5
     l_thresh = 0.35
     with torch.no_grad():
-        for i, (x, name, pos) in enumerate(test_dataloader):  #8个case18
+        for i, (x, name, pos) in enumerate(test_dataloader):  
             name = name[0]
             if name != last_name:
                 if last_name != '':
@@ -212,7 +212,6 @@ def test(data_root, model_stage, best_epoch, testlog_savepath, result_savepath,
             Pre_std, Sen_mean, Sen_std, Spe_mean, Spe_std)
         with open(testlog_savepath, 'a') as file:
             file.writelines([line + '\n'])
-        #画图
         metrics = [TDs, BDs, DSCs, Pres, Sens, Spes]
         plt.figure(figsize=(10, 10))
         b = plt.boxplot(metrics,
@@ -227,12 +226,9 @@ def test(data_root, model_stage, best_epoch, testlog_savepath, result_savepath,
         plt.xticks(fontsize=25)
         plt.yticks(fontsize=25)
         y_major_locator = MultipleLocator(10)
-        #把y轴的刻度间隔设置为10，并存在变量里
         ax = plt.gca()
-        #ax为两条坐标轴的实例
         ax.yaxis.set_major_locator(y_major_locator)
         plt.ylim(0, 105)
-        #把y轴的刻度范围设置为-5到110，同理，-5不会标出来，但是能看到一点空白
         plt.savefig('Metrics of ' + folder_name + '.png')
         plt.show()
         # np.save('metrics of '+whichstage+'.npy', metrics)
@@ -274,7 +270,6 @@ def evaluation_case_test(pred, label, name,testlog_savepath,file_root):
     return TD,BD,DSC,Pre,Sen,Spe
 
 if __name__ == '__main__':
-    ###################################### GPU setup
     gpu_all_num = 8
     gpu_need_num = 4
     lm_per_gpu = 20000

@@ -178,8 +178,8 @@ For any questions, feel free to open an issue or contact us.
 
 <!-- 
 
-git config --global http.proxy  http://127.0.0.1:13047
-git config --global https.proxy https://127.0.0.1:13047
+git config --global http.proxy  http://127.0.0.1:16159
+git config --global https.proxy https://127.0.0.1:16159
 
 git add .
 git commit -m "updata"

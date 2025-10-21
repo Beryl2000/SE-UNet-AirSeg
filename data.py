@@ -307,9 +307,7 @@ class AirwayHMData(Dataset):
 
         cube_size = self.cube_size
 
-        # -------- 核心采样循环 --------
         for _ in range(self.batch_size):
-            # 按当前动态比例选择
             if np.random.random() < self.hard_ratio:
                 # Hard mining（50% skeleton / 50% small airway）
                 img_crop, label_crop, weight_crop = hard_sample(
@@ -457,7 +455,7 @@ class AirwayHMData3(Dataset):
         dis = ndimage.distance_transform_edt(label)
         loc_small = np.where((dis * skeleton) < 2)
         loc_skeleton = np.where(skeleton * (1 - pred))
-        loc_break = br_skel  # 已经是 break skeleton 的 mask
+        loc_break = br_skel 
         cube_size = self.cube_size
 
         for _ in range(self.batch_size):
@@ -470,7 +468,7 @@ class AirwayHMData3(Dataset):
                         img, label, weight, skeleton, loc_break, cube_size
                     )
                 else:
-                    # Skeleton 或 Small airway
+                    # Skeleton or Small airway
                     if np.random.random() < 0.5:
                         img_crop, label_crop, weight_crop, skel_crop = small_airway_sample_wg(
                             img, label, weight, skeleton, loc_small, cube_size

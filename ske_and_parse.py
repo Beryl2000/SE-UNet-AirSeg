@@ -75,13 +75,12 @@ def tree_parse(label_root, file_path, save_root, save_root2):
         label = sitk.ReadImage(os.path.join(label_root, f))
         numpyOrigin = list(label.GetOrigin())
         numpySpacing = list(label.GetSpacing())
-        label = sitk.GetArrayFromImage(label) #已经是xyz
+        label = sitk.GetArrayFromImage(label) 
         # label = label.transpose(2, 1, 0) 
         label = (label > 0).astype(np.uint8)
         label = large_connected_domain26(label)
         
         skeleton = skeletonize_3d(label)
-        # skeleton = skeleton.transpose(2, 1, 0)?????
         skeleton_nii = sitk.GetImageFromArray(skeleton)
         skeleton_nii.SetSpacing(numpySpacing)
         skeleton_nii.SetOrigin(numpyOrigin)

@@ -1,14 +1,12 @@
 import os
 import numpy as np
 import torch
-import skimage.measure as measure
 import pyvista as pv
 from skimage.morphology import skeletonize_3d
 from skimage.measure import marching_cubes_lewiner
 from stl import mesh
 from SE_UNet import SE_UNet
 from preprocessing import preprocess_CT,load_itk_image,save_itk
-from ske_and_parse import Topology_Tree
 from util import *
 import time
 
@@ -28,7 +26,7 @@ def double_threshold_iteration(pred, h_thresh, l_thresh):
             for j in range(w):
                 for k in range(z):
                     if gbin[i][j][k] == 0 and pred[i][j][k] < h_thresh*255 and pred[i][j][k] >= l_thresh*255:
-                        for n in range(0, 26):  # 26领域
+                        for n in range(0, 26):  
                             inn = i + neigb[n, 0]
                             jnn = j + neigb[n, 1]
                             knn = k + neigb[n, 2]
@@ -110,7 +108,7 @@ def network_prediction(model_path,patient,data_path, save_path,flip=False,gpu='0
 
     pred = pred/pred_num
     pred = np.squeeze(pred)
-    pred=double_threshold_iteration(pred,h_thresh=0.5,l_thresh=0.35)
+    pred=double_threshold_iteration(pred,h_thresh=0.5,l_thresh=0.4)
     pred[0:int(0.15 * pred.shape[0]), :, :] = 0
     pred[int(0.85 * pred.shape[0]):, :, :] = 0
     pred[:, 0:int(0.15 * pred.shape[1]), :] = 0
@@ -124,10 +122,8 @@ def network_prediction(model_path,patient,data_path, save_path,flip=False,gpu='0
         for y in range(result.shape[1]):
             result[ :,y, :] = np.flipud(result[ :,y, :])
 
-    ###########重建pred_img
     iso = 0.95
     verts, faces, _, _ = marching_cubes_lewiner(result, iso)
-    ####原点更改至所有中心线的均值xyz
     skel = skeletonize_3d(result)
     B = np.array(np.where(skel != 0))
     B = B[:, B[2].argsort()]
@@ -142,12 +138,12 @@ def network_prediction(model_path,patient,data_path, save_path,flip=False,gpu='0
     verts[:, 0] = verts[:, 0] * spacing[0]/10
     verts[:, 1] = verts[:, 1] * spacing[1]/10
     verts[:, 2] = verts[:, 2] * spacing[2]/10
-    cube_a = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))  # 创建网格
+    cube_a = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype)) 
     for i, f in enumerate(faces):
         for j in range(3):
             cube_a.vectors[i][j] = verts[f[j], :]
     cube_a.save(save_path + "/" +patient+'.stl')
-    mesh_a = pv.read(save_path + "/" +patient+'.stl')  # 光滑
+    mesh_a = pv.read(save_path + "/" +patient+'.stl') 
     mesh_a_smooth = mesh_a.smooth(relaxation_factor=0.2)
     mesh_a_smooth.plot(background='w')
     mesh_a_smooth.save(save_path + "/" +patient+'.stl')
@@ -157,60 +153,7 @@ def network_prediction(model_path,patient,data_path, save_path,flip=False,gpu='0
 
     return result,spacing
 
-def airway_grade(patient,pred,spacing,merge_t):
-    ###########################
-    # 输入LA
-    px, py, pz = spacing[0],spacing[1],spacing[2]
-    px=px/10
-    py=py/10
-    pz=pz/10
-    # 确定图像z轴排列顺序
-    oneslice=pred[:, :, int(0.75 * pred.shape[2])]
-    imLabel, _ = measure.label(oneslice, background=0, return_num=True)
-    noback = np.bincount(imLabel.reshape(-1))
-    noback[0] = 0
-    max_num = np.max(noback)
-    # print(max_num)
-    if max_num<180:
-        order=0
-    else:
-        order=1
-    # print(order)
-    #################### 分割结果pred【numpy】  ====>  airway_topo【Topology_Tree】
-    remerge_l=['000','001']#主要必须是三分叉的地方
-    airway_topo=Topology_Tree(pred,order,merge_t,remerge_l)
-    #1
-    airway_topo.sub() #骨架提取与分段操作得到airway_topo.Bi
-    #2
-    airway_topo.merge() #去掉叶末、枝中的小段更新airway_topo.Bi
-    #3
-    airway_topo.grade() #初步编码分级得到airway_topo.Bi_g
-    #4
-    airway_topo.remerge() #融合必须是三分叉的地方，并重新编码更新airway_topo.Bi、airway_topo.Bi_g
-    #5
-    save_dir='./sub_dicts'
-    if not os.path.exists(save_dir):
-        os.mkdir(save_dir)
-    dir_s='./sub_dicts/'+patient+'_grade.npy'
-    airway_topo.resize(px,py,pz,dir_s) #输入pixel size执行resized操作得到airway_topo.Bi_resize\airway_topo.Bi_g_resize
-    #6
-    print('气管树分级重建中...')
-    dir_r='./predicted_airways/'+patient+'.stl'
-    dir_s='./sub_models/'+patient
-    if not os.path.exists(dir_s):
-        os.makedirs(dir_s)
-    for i in os.listdir(dir_s) :
-        file_data = dir_s + "/" + i
-        os.remove(file_data)
-    airway_topo.recons(dir_r)
-    airway_topo.sub_model(dir_r,dir_s,color_type='graduated')#执行模型分段 
-    print('气管树分级重建完成！')
-    #7
-    airway_topo.show_line0(dir_r,color_type='graduated') #模型加中线线段并标注分级
-
-
 if __name__ == '__main__':
-    ###################################### GPU setup
     gpu_all = 1
     gpu_need = 1
     lm_per_gpu = 20000
@@ -230,16 +173,13 @@ if __name__ == '__main__':
     flist = os.listdir(DCM_Path)
     flist.sort()
     for patient in flist:
-        print('ct名称：', patient)
+        print('ct：', patient)
         data_path = os.path.join(DCM_Path , patient)
         save_path = './processed_cases/'
-        #预处理
-        # preprocess_CT(data_path,  save_path,format='dcm', mode='prediction', multides=True)
         preprocess_CT(data_path,save_path,format='nii.gz',mode='prediction',multides=False)
 
         data_path = './processed_cases/'
         save_path = './predicted_airways/'
-        #分割
         pred, spacing = network_prediction(model_path,
                                             patient,
                                             data_path,
