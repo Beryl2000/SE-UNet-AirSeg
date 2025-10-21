@@ -57,7 +57,7 @@ Required packages include: `torch`, `numpy`, `scipy`, `SimpleITK`, `scikit-image
 
 3. **Compute prior weights**
    ```bash
-   python LIB_weight.py
+   python lib_weight.py
    ```
    Calculate local-size-based airway prior weights. Results are stored in `./data/LIB_weight`.
 
@@ -168,11 +168,18 @@ If you use this project in your research, please cite the following papers:
 }
 ```
 
+## 🔮 Future Updates
+
+- [x] ~~Sharing data splits and preprocessing scripts.~~
+- [x] ~~Training code~~
+
+For any questions, feel free to open an issue or contact us.
+
 
 <!-- 
 
-git config --global http.proxy  http://127.0.0.1:10631
-git config --global https.proxy https://127.0.0.1:10631
+git config --global http.proxy  http://127.0.0.1:13047
+git config --global https.proxy https://127.0.0.1:13047
 
 git add .
 git commit -m "updata"
