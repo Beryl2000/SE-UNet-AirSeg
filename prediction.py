@@ -6,7 +6,7 @@ import pyvista as pv
 from skimage.morphology import skeletonize_3d
 from skimage.measure import marching_cubes_lewiner
 from stl import mesh
-from SE_UNet import DMR_UNet
+from SE_UNet import SE_UNet
 from preprocessing import preprocess_CT,load_itk_image,save_itk
 from ske_and_parse import Topology_Tree
 from util import *
@@ -59,7 +59,7 @@ def network_prediction(model_path,patient,data_path, save_path,flip=False,gpu='0
     start_time = time.time()
     print ('starting segmenting lung CT')
 
-    model = DMR_UNet(in_channel=2, n_classes=1)
+    model = SE_UNet(in_channel=2, n_classes=1)
     weights_dict = torch.load(model_path)
     model.load_state_dict(weights_dict, strict=False)
     model = torch.nn.DataParallel(model).cuda()
@@ -225,7 +225,7 @@ if __name__ == '__main__':
 
 
 
-    model_path = 'saved_model/stage_three/DMR_UNet_43.pth'
+    model_path = 'saved_model/stage_three/SE_UNet_43.pth'
     DCM_Path = 'example_dcm'
     flist = os.listdir(DCM_Path)
     flist.sort()

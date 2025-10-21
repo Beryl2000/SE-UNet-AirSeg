@@ -7,9 +7,10 @@ import cc3d
 import skimage.measure as measure
 import SimpleITK as sitk
 import bisect
+import nibabel
 import shutil
 from torch.utils.data import DataLoader
-from SE_UNet import DMR_UNet
+from SE_UNet import SE_UNet
 from data import AirwayHMData, OnlineHMData,OnlineHMData3,AirwayHMData3, CropSegData, SegValCropData
 from save_gradients import save_gradients_tw
 from weight_br import save_s2_pred,save_weight_break
@@ -66,40 +67,13 @@ def general_union_loss_lib(pred, target, weight):
     intersection2 = (weight * (alpha * pred + beta * target)).sum()
     return 1 - (intersection + smooth) / (intersection2 + smooth)
 
-def br_loss(pred, target, skel,weight):
+def atr_loss(pred, target, skel,weight):
     smooth = 1.0
     target=skel
     pred=pred*skel
     intersection = (weight * pred* target).sum()
     intersection2 = (weight * (pred + target)).sum()
     return 1 - (intersection + smooth) / (intersection2 + smooth)
-
-def D_Wi(pred_en, pred_de):
-    # #计算动态权重
-    gamma = 2
-    alpha = 0.9
-
-    pred_en_numpy = pred_en.cpu().detach().numpy()
-    pred_de_numpy = pred_de.cpu().detach().numpy()
-
-    smooth = 1e-5
-
-    loss11 = (1 - pred_en_numpy)**gamma * np.log10(pred_en_numpy + smooth)
-    loss10 = (pred_en_numpy)**gamma * np.log10(1 - pred_en_numpy + smooth)
-    dynamic_weight1 = -alpha * loss11 - (1 - alpha) * loss10
-    dynamic_weight1[dynamic_weight1 > 1] = 1
-
-    loss21 = (1 - pred_de_numpy)**gamma * np.log10(pred_de_numpy + smooth)
-    loss20 = (pred_de_numpy)**gamma * np.log10(1 - pred_de_numpy + smooth)
-    dynamic_weight2 = -alpha * loss21 - (1 - alpha) * loss20
-    dynamic_weight2[dynamic_weight2 > 1] = 1
-
-    dynamic_weight = 0.3 * dynamic_weight1 + 0.7 * dynamic_weight2
-    if np.isnan(np.min(dynamic_weight)):
-        sdfs = 3
-    dynamic_weight = torch.from_numpy(np.array(dynamic_weight))
-    dynamic_weight = dynamic_weight.float().cuda()
-    return dynamic_weight
 
 def save_data_online(path, image, label, weight, names, limits=1500):
     name_list = os.listdir(os.path.join(path, 'image'))
@@ -163,11 +137,10 @@ def save_data_online3(path, image, label, weight, skel,names, limits=1500):
             np.save(os.path.join(path, 'weight', names[i]), weight[i])
             np.save(os.path.join(path, 'skel', names[i]), skel[i].astype(np.int8))
 
-def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,br_skel_path,BR_weight_path,aug, DTI,
-           DWi, start_model, start_epoch, file_path, file_root, gpu):
-    max_epoches = 75
-    batch_size =8
-    aug_flag = aug  #是否数剧增强 否1 是2
+def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,br_skel_path,BR_weight_path,aug, DTI,start_model, start_epoch, file_path, file_root, gpu):
+    max_epoches = 10
+    batch_size =2
+    aug_flag = aug  
 
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
 
@@ -182,7 +155,7 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
     def worker_init_fn(worker_id):
         np.random.seed(1 + worker_id)
 
-    model = DMR_UNet(in_channel=2, n_classes=1)
+    model = SE_UNet(in_channel=2, n_classes=1)
     train_dataset = AirwayHMData3(file_path=file_path,
                                   data_root=data_root,
                                   file_root=file_root,
@@ -200,11 +173,11 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
                                    drop_last=True)
     valid_dataset = SegValCropData(file_path,
                                    data_root,
-                                   batch_size=24,
+                                   batch_size=2,
                                    cube_size=128,
                                    step=64)
     valid_dataloader = DataLoader(dataset=valid_dataset,
-                                  batch_size=24,
+                                  batch_size=2,
                                   shuffle=False,
                                   num_workers=10,
                                   pin_memory=True,
@@ -216,13 +189,17 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
                                                         milestones=[40, 60],
                                                         gamma=0.1)
     # resume
-    # weights_dict = torch.load(os.path.join(model_savepath ,'DMR_UNet_9.pth'))
+    # weights_dict = torch.load(os.path.join(model_savepath ,'SE_UNet_9.pth'))
     weights_dict = torch.load(start_model +
-                              'DMR_UNet_{}.pth'.format(start_epoch))
+                              'SE_UNet_{}.pth'.format(start_epoch))
     model.load_state_dict(weights_dict, strict=False)
     model = torch.nn.DataParallel(model).cuda()
     model.train()
     starttime = time.time()
+    val_td_list=[]
+    val_bd_list=[]
+    val_loss_random=[]
+    val_loss_hard=[]
     for ep in range(max_epoches):
         if os.path.exists(online_savepath):
             shutil.rmtree(online_savepath)
@@ -257,17 +234,12 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
             pred_en = torch.sigmoid(pred_en)
             pred_de = torch.sigmoid(pred_de)
 
-            if DWi == 1:
-                dynamic_weight = D_Wi(pred_en, pred_de)
-                weight = dynamic_weight + weight
-
             dice_loss_en = general_union_loss_lib(pred_en, label, weight)
             dice_loss_de = general_union_loss_lib(pred_de, label, weight)
-            dice_loss_ori = dice_loss(pred_en, label) + dice_loss(
-                pred_de, label)
-            break_loss = br_loss(pred_en, label, skel, weight) + br_loss(
+
+            break_loss = atr_loss(pred_en, label, skel, weight) + atr_loss(
                 pred_de, label, skel, weight)
-            loss = dice_loss_ori * 0.5 + dice_loss_de * 1 + dice_loss_en * 0.5 + break_loss * 0.5  #混合loss
+            loss =  dice_loss_de * 1 + dice_loss_en * 0.5 + break_loss * 0.5  #混合loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -285,22 +257,21 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
                              skel,
                              names,
                              limits=int(len(train_dataset) * batch_size *
-                                        0.3))  #limit of loss???
+                                        0.3)) 
 
             if iter % 10 == 0:
                 print('epoch:', ep, iter + ep * len(train_dataset), '/',
-                      max_step, 'loss:', loss.item(), 'dice loss:',
-                      dice_loss_ori.item(), 'GUL encode:', dice_loss_en.item(),
+                      max_step, 'loss:', loss.item(), 'GUL encode:', dice_loss_en.item(),
                       'GUL decode:', dice_loss_de.item(), 'break loss:',
                       break_loss.item())
 
-            writer.add_scalars('Train', {'loss': loss.item(), 'dice_loss': dice_loss_ori.item(),'GUL_encode': dice_loss_en.item(),'GUL_decode': dice_loss_de.item(),'break_loss': break_loss.item()}, iter + ep * len(train_dataset))
+            writer.add_scalars('Train', {'loss': loss.item(),'GUL_encode': dice_loss_en.item(),'GUL_decode': dice_loss_de.item(),'break_loss': break_loss.item()}, iter + ep * len(train_dataset))
         torch.cuda.empty_cache()
 
         writer.close()                  
         lr_scheduler.step()
         # '''
-        print('start online hard mining: ')
+        # print('start online hard mining: ')
         hm_dataset = OnlineHMData3(data_root=online_savepath,
                                   batch_size=8,
                                   rate=1.0)
@@ -318,37 +289,40 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
             pred_en, pred_de = model(data)
             pred_en = torch.sigmoid(pred_en)
             pred_de = torch.sigmoid(pred_de)
-            dice_loss_ori = dice_loss(pred_en, label) + dice_loss(
-                pred_de, label)
-            break_loss = br_loss(pred_en, label, skel, weight) + br_loss(
+
+            break_loss = atr_loss(pred_en, label, skel, weight) + atr_loss(
                 pred_de, label, skel, weight)
             dice_loss_all = general_union_loss_lib(pred_en, label, weight) * 0.5 + \
                             general_union_loss_lib(pred_de, label, weight)
-            loss = break_loss * 0.5 + dice_loss_all + dice_loss_ori * 0.5
+            loss = break_loss * 0.5 + dice_loss_all
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            if iter % 10 == 0:
-                print('epoch:', ep,
-                      iter + ep * len(train_dataset), '/', max_step, 'loss:',
-                      loss.item(), 'dice loss:', dice_loss_ori.item(), 'GUL:',
-                      dice_loss_all.item(), 'break loss:', break_loss.item())
+
 
         lr_scheduler.step()
         # '''
         print('')
-        validation(data_root, model, valid_dataloader, ep, log_savepath, DTI,
+        TD_mean, BD_mean, loss_random, loss_hard=validation(data_root, model, valid_dataloader, ep, log_savepath, DTI,
                    file_root)
         print('')
+
+        val_td_list.append(TD_mean)
+        val_bd_list.append(BD_mean)
+        val_loss_random.append(loss_random)
+        val_loss_hard.append(loss_hard)
+
+        train_dataset.update_scheduler(ep, val_loss_random, val_loss_hard, val_td_list, val_bd_list)
+
 
         torch.cuda.empty_cache()
         if not os.path.exists(model_savepath):
             os.mkdir(model_savepath)
         torch.save(
             model.module.state_dict(),
-            os.path.join(model_savepath, 'DMR_UNet_' + str(ep) + '.pth'))
-        print(ep, ':', time.time() - starttime)
+            os.path.join(model_savepath, 'SE_UNet_' + str(ep) + '.pth'))
+        # print(ep, ':', time.time() - starttime)
     sdf = 2
 
 def train2(data_root,
@@ -358,15 +332,14 @@ def train2(data_root,
            pred_path,
            aug,
            DTI,
-           DWi,
            start_model,
            start_epoch,
            file_path,
            file_root,
            gpu='0'):
-    max_epoches = 75
+    max_epoches = 50
     batch_size =8
-    aug_flag = aug  #是否数剧增强 否1 是2
+    aug_flag = aug  
 
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
 
@@ -381,7 +354,7 @@ def train2(data_root,
     def worker_init_fn(worker_id):
         np.random.seed(1 + worker_id)
 
-    model = DMR_UNet(in_channel=2, n_classes=1)
+    model = SE_UNet(in_channel=2, n_classes=1)
 
     train_dataset = AirwayHMData(file_path=file_path,
                                  data_root=data_root,
@@ -415,14 +388,18 @@ def train2(data_root,
                                                         gamma=0.1)
 
     # resume
-    weights_dict = torch.load(os.path.join(model_savepath ,'DMR_UNet_63.pth'))
-    # weights_dict = torch.load(start_model +
-    #                           'DMR_UNet_{}.pth'.format(start_epoch))
+    # weights_dict = torch.load(os.path.join(model_savepath ,'SE_UNet_63.pth'))
+    weights_dict = torch.load(start_model +
+                              'SE_UNet_{}.pth'.format(start_epoch))
     model.load_state_dict(weights_dict, strict=False)
     model = torch.nn.DataParallel(model).cuda()
     model.train()
     starttime = time.time()
-    for ep in range(64,max_epoches):
+    val_td_list=[]
+    val_bd_list=[]
+    val_loss_random=[]
+    val_loss_hard=[]
+    for ep in range(max_epoches):
         if os.path.exists(online_savepath):
             shutil.rmtree(online_savepath)
             os.mkdir(online_savepath)
@@ -451,15 +428,10 @@ def train2(data_root,
             pred_en = torch.sigmoid(pred_en)
             pred_de = torch.sigmoid(pred_de)
 
-            if DWi == 1:
-                dynamic_weight=D_Wi(pred_en, pred_de)
-                weight = dynamic_weight + weight
-
             dice_loss_en = general_union_loss_lib(pred_en, label, weight)
             dice_loss_de = general_union_loss_lib(pred_de, label, weight)
-            dice_loss_ori = dice_loss(pred_en, label) + dice_loss(
-                pred_de, label)
-            loss = dice_loss_de * 1 + dice_loss_en * 0.5 + dice_loss_ori * 0.5  #混合loss
+
+            loss = dice_loss_de * 1 + dice_loss_en * 0.5
             if np.isnan(loss.item()):
                 sdfs = 3
             optimizer.zero_grad()
@@ -477,23 +449,22 @@ def train2(data_root,
                              weight,
                              names,
                              limits=int(len(train_dataset) * batch_size *
-                                        0.3))  #limit of loss???
+                                        0.3)) 
 
             if iter % 10 == 0:
                 print('epoch:', ep, iter + ep * len(train_dataset), '/',
                       max_step, 'loss:', loss.item(), 'dice loss encode:',
                       dice_loss_en.item(), 'dice loss decode:',
-                      dice_loss_de.item(), 'dice loss original:',
-                      dice_loss_ori.item())
+                      dice_loss_de.item())
 
-            writer.add_scalars('Train', {'loss': loss.item(), 'dice_loss_encode': dice_loss_en.item(),'dice_loss_decode': dice_loss_de.item(),'dice_loss_original': dice_loss_ori.item()}, iter + ep * len(train_dataset))
+            writer.add_scalars('Train', {'loss': loss.item(), 'dice_loss_encode': dice_loss_en.item(),'dice_loss_decode': dice_loss_de.item()}, iter + ep * len(train_dataset))
         torch.cuda.empty_cache()
 
         writer.close()            
 
         lr_scheduler.step()
 
-        print('start online hard mining: ')
+        # print('start online hard mining: ')
         hm_dataset = OnlineHMData(data_root=online_savepath,
                                   batch_size=8,
                                   rate=1.0)
@@ -508,25 +479,28 @@ def train2(data_root,
             label = pack[1].float().cuda()
             weight = pack[2].float().cuda()
             pred_en, pred_de = model(data)
-            dice_loss_ori = dice_loss(pred_en, label) + dice_loss(
-                pred_de, label)
+
             pred_en = torch.sigmoid(pred_en)
             pred_de = torch.sigmoid(pred_de)
             dice_loss_all = general_union_loss_lib(pred_en, label, weight) * 0.5 + \
                             general_union_loss_lib(pred_de, label, weight)
-            loss = dice_loss_ori * 0.5 + dice_loss_all
+            loss =  dice_loss_all
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            if iter % 10 == 0:
-                print('epoch:', ep, iter + ep * len(train_dataset), '/',
-                      max_step, 'loss:', loss.item(), 'dice loss:',
-                      dice_loss_all.item(), 'dice loss:', dice_loss_ori.item())
+
         lr_scheduler.step()
 
         print('')
-        validation(data_root,model, valid_dataloader, ep, log_savepath, DTI, file_root)
+        TD_mean, BD_mean, loss_random, loss_hard=validation(data_root,model, valid_dataloader, ep, log_savepath, DTI, file_root)
         print('')
+
+        val_td_list.append(TD_mean)
+        val_bd_list.append(BD_mean)
+        val_loss_random.append(loss_random)
+        val_loss_hard.append(loss_hard)
+
+        train_dataset.update_scheduler(ep, val_loss_random, val_loss_hard, val_td_list, val_bd_list)
 
         torch.cuda.empty_cache()
 
@@ -534,8 +508,8 @@ def train2(data_root,
             os.mkdir(model_savepath)
         torch.save(
             model.module.state_dict(),
-            os.path.join(model_savepath, 'DMR_UNet_' + str(ep) + '.pth'))
-        print(ep, ':', time.time() - starttime)
+            os.path.join(model_savepath, 'SE_UNet_' + str(ep) + '.pth'))
+        # print(ep, ':', time.time() - starttime)
     sdf = 2
 
 def train(data_root,model_savepath,
@@ -548,7 +522,7 @@ def train(data_root,model_savepath,
           ):
     max_epoches = 100
     batch_size =8
-    aug_flag = aug  #是否数剧增强 否1 是2
+    aug_flag = aug  
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
 
 
@@ -563,7 +537,7 @@ def train(data_root,model_savepath,
     def worker_init_fn(worker_id):
         np.random.seed(1 + worker_id)
 
-    model = DMR_UNet(in_channel=2, n_classes=1)
+    model = SE_UNet(in_channel=2, n_classes=1)
 
     train_dataset = CropSegData(file_path=file_path,
                                 data_root=data_root,
@@ -596,7 +570,7 @@ def train(data_root,model_savepath,
                                                         gamma=0.1)
 
     # resume
-    # weights_dict = torch.load(os.path.join(model_savepath ,'DMR_UNet_27.pth'))
+    # weights_dict = torch.load(os.path.join(model_savepath ,'SE_UNet_27.pth'))
     # model.load_state_dict(weights_dict, strict=False)
     model = torch.nn.DataParallel(model).cuda()
     model.train()
@@ -639,8 +613,8 @@ def train(data_root,model_savepath,
         lr_scheduler.step()
 
         print('')
-        if ep == 99:
-            validation(data_root,model, valid_dataloader, ep, log_savepath, DTI,
+        if ep == max_epoches-1:
+            TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, ep, log_savepath, DTI,
                        file_root)
         print('')
         torch.cuda.empty_cache()
@@ -649,16 +623,19 @@ def train(data_root,model_savepath,
             os.mkdir(model_savepath)
         torch.save(
             model.module.state_dict(),
-            os.path.join(model_savepath, 'DMR_UNet_' + str(ep) + '.pth'))
-        print(ep, ':', time.time() - starttime)
+            os.path.join(model_savepath, 'SE_UNet_' + str(ep) + '.pth'))
+        # print(ep, ':', time.time() - starttime)
+    return max_epoches
 
 def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_root):
     model.train()
     TDs,BDs,DSCs,Pres,Sens,Spes = [], [], [], [],[], []
+    val_losses_random, val_losses_hard = [], []
+
     last_name = ''
     flag = False
     h_thresh=0.5
-    l_thresh=0.35
+    l_thresh=0.4
     with torch.no_grad():
         for i, (x, name, pos) in enumerate(valid_dataloader):
             name = name[0]
@@ -671,6 +648,16 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
                         pred[pred < 0.5] = 0
                     else:
                         pred=double_threshold_iteration(pred,h_thresh,l_thresh)
+
+                                
+
+                    hard_pred = pred * (1 - pred1)
+                    hard_label= label * (1 - pred1)
+
+                    val_losses_random.append(2 * (pred * label).sum() / (pred + label).sum())
+                    val_losses_hard.append(2 * (hard_pred * hard_label).sum() / (hard_pred + hard_label).sum())
+
+                    
                     TD,BD,DSC,Pre,Sen,Spe= evaluation_case(pred, label, last_name,file_root)
                     TDs.append(TD)
                     BDs.append(BD)
@@ -681,6 +668,10 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
 
                 label = sitk.ReadImage(data_root+'/mask/'+name+ 'mask_cut' + '.nii.gz')
                 label = sitk.GetArrayFromImage(label)
+
+                pred1 = nibabel.load( os.path.join(file_root, 'pred_1',name + '.nii.gz'))
+                pred1 = pred1.get_fdata()[0]
+
                 pred = np.zeros(label.shape)
                 pred = pred[np.newaxis, np.newaxis, ...]
                 pred_num = np.zeros(pred.shape)
@@ -705,6 +696,14 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
         else:
             pred=double_threshold_iteration(pred,h_thresh,l_thresh)
 
+
+        hard_pred = pred * (1 - pred1)
+        hard_label= label * (1 - pred1)
+
+        val_losses_random.append(2 * (pred * label).sum() / (pred + label).sum())
+        val_losses_hard.append(2 * (hard_pred * hard_label).sum() / (hard_pred + hard_label).sum())
+
+
         TD,BD,DSC,Pre,Sen,Spe= evaluation_case(pred, label, last_name,file_root)
         TDs.append(TD)
         BDs.append(BD)
@@ -725,12 +724,16 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
         Sen_std = np.std(Sens)
         Spe_mean = np.mean(Spes)
         Spe_std = np.std(Spes)
+        val_loss_random= np.mean(val_losses_random)
+        val_loss_hard= np.mean(val_losses_hard)
+        
         print("TD: %0.4f (%0.4f), BD: %0.4f (%0.4f), DSC: %0.4f (%0.4f), Pre: %0.4f (%0.4f), Sen: %0.4f (%0.4f), Spe: %0.4f (%0.4f)" % (
                TD_mean, TD_std,BD_mean,BD_std,DSC_mean,DSC_std,Pre_mean,Pre_std,Sen_mean,Sen_std,Spe_mean,Spe_std))
         line = "TD: %0.4f (%0.4f), BD: %0.4f (%0.4f), DSC: %0.4f (%0.4f), Pre: %0.4f (%0.4f), Sen: %0.4f (%0.4f), Spe: %0.4f (%0.4f)" % (
                TD_mean, TD_std,BD_mean,BD_std,DSC_mean,DSC_std,Pre_mean,Pre_std,Sen_mean,Sen_std,Spe_mean,Spe_std)
         with open(log_savepath, 'a') as file:
             file.writelines(['epoch:' + str(epoch)+'\n', line+'\n', '\n'])
+    return TD_mean, BD_mean, val_loss_random, val_loss_hard
 
 def evaluation_case(pred, label, name,file_root):
     parsing = sitk.ReadImage(os.path.join(file_root, 'tree_parse_val', name + 'mask_cut.nii.gz'))
@@ -822,13 +825,13 @@ def valid(log_path):
 def dtival(model_savepath,log_savepath,data_root,file_path,file_root,dtiep,gpu='0'):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
 
-    model = DMR_UNet(in_channel=2, n_classes=1)
+    model = SE_UNet(in_channel=2, n_classes=1)
 
     valid_dataset = SegValCropData(file_path, data_root, batch_size=24, cube_size = 128, step = 64)
     valid_dataloader = DataLoader(dataset=valid_dataset, batch_size=24, shuffle=False, num_workers=10,
                                   pin_memory=True, drop_last=True)
 
-    weights_dict = torch.load(os.path.join(model_savepath ,'DMR_UNet_{}.pth'.format(dtiep)))
+    weights_dict = torch.load(os.path.join(model_savepath ,'SE_UNet_{}.pth'.format(dtiep)))
     model.load_state_dict(weights_dict, strict=False)
     model = torch.nn.DataParallel(model).cuda()
     model.train()
@@ -836,13 +839,12 @@ def dtival(model_savepath,log_savepath,data_root,file_path,file_root,dtiep,gpu='
     starttime=time.time()
     print('')
     DTI=1
-    validation(data_root,model, valid_dataloader, dtiep,log_savepath,DTI,file_root)
+    TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, dtiep,log_savepath,DTI,file_root)
     # print((time.time()-starttime)/60,'mins')
     torch.cuda.empty_cache()
 
 
 if __name__ == '__main__':
-    ###################################### GPU setup
     # gpu_all_num = 8
     # gpu_need_num = 2
     # lm_per_gpu = 40000
@@ -855,69 +857,58 @@ if __name__ == '__main__':
     # gpu = ','.join(
     #     [str(x) for x in list(np.where(free > lm_per_gpu)[0][0:gpu_need_num])])
     
-    gpu = '0,2'
+    gpu = '0'
 
     ###################################### TRAIN_STAGE_1################################################################14 bs
-    data_root = '/mnt/yby/CT_DATASET_BAS_90'
+    data_root = 'AFTER_DATA'
     file_path = './data/base_dict.json'
     file_root = './data'
     model_savepath = './saved_model/stage_one'
     log_savepath = './LOG/log_stage_one.txt'
-    aug = 2  #1=不
-    DTI = 1  #0=不
-    # train(data_root, model_savepath, log_savepath, aug, DTI, file_path,
-    #       file_root, gpu)
+    aug = 1 
+    DTI = 1 
+    # s1_epes=train(data_root, model_savepath, log_savepath, aug, DTI, file_path,file_root, gpu)
 
     ###################################### STAGE_1_PRED
     pred1_path = './data/pred_1'
-    # save_gradients_tw(data_root,
-    #                   stage_load=model_savepath,
-    #                   file_root=file_root,
-    #                   savepath=pred1_path,
-    #                   file_path=file_path,
-    #                   layer=0,
-    #                   gpu=gpu)
+    # save_gradients_tw(data_root,stage_load=model_savepath,file_root=file_root,savepath=pred1_path,file_path=file_path,layer=0,gpu=gpu,s1_epes=s1_epes)
 
     ###################################### TRAIN_STAGE_2
-    start_model = './saved_model/stage_one/'
-    start_epoch = 99
+    # start_model = './saved_model/stage_one/'
+    # start_epoch = s1_epes-1
 
-    data_root = '/mnt/yby/CT_DATASET_BAS_90'
-    model_savepath = './saved_model/stage_two'
-    online_savepath = './data/online_hardmining_stage_two'
-    log_savepath = './LOG/log_stage_two.txt'
-    aug = 2  #1=不
-    DTI = 0
-    DWi = 1  #0=不
-    train2(data_root, model_savepath, online_savepath, log_savepath,pred1_path, aug, DTI,
-           DWi, start_model, start_epoch, file_path, file_root, gpu)
+    # data_root = 'AFTER_DATA'
+    # model_savepath = './saved_model/stage_two'
+    # online_savepath = './data/online_hardmining_stage_two'
+    # log_savepath = './LOG/log_stage_two.txt'
+    # aug = 1  
+    # DTI = 0
+    # train2(data_root, model_savepath, online_savepath, log_savepath,pred1_path, aug, DTI, start_model, start_epoch, file_path, file_root, gpu)
 
     ###################################### STAGE_2_PRED/BR-wi/br_skel
-    epoch = valid_recall(log_savepath)
-    whichepoch = './saved_model/stage_two/DMR_UNet_{}.pth'.format(epoch)
+    # epoch = valid_recall(log_savepath)
+    epoch=65
+    whichepoch = './saved_model/stage_two/SE_UNet_{}.pth'.format(epoch)
     pred2_path = './data/pred_2'
-    save_s2_pred(data_root, whichepoch, pred2_path, file_root, file_path,gpu)
+    # save_s2_pred(data_root, whichepoch, pred2_path, file_path,gpu)
 
     BR_weight_path = './data/BR_weight'
     br_skel_path = './data/br_skel'
-    save_weight_break(data_root, pred2_path, BR_weight_path, br_skel_path, file_root,file_path)
+    # save_weight_break(data_root, pred2_path, BR_weight_path, br_skel_path,file_path)
 
     ###################################### TRAIN_STAGE_3
     start_model = './saved_model/stage_two/'
-    log_path = './LOG/log_stage_two.txt'
-    best_epoch = valid_recall(log_path)
-    start_epoch = best_epoch
+    start_epoch = epoch
 
     model_savepath = './saved_model/stage_three'
     online_savepath = './data/online_hardmining_stage_three'
     log_savepath = './LOG/log_stage_three.txt'
-    aug = 2  #1=不
+    aug = 1
     DTI = 0
-    DWi = 1  #0=不
-    train3(data_root,model_savepath, online_savepath, log_savepath,pred2_path,br_skel_path,BR_weight_path,aug, DTI, DWi,
+    train3(data_root,model_savepath, online_savepath, log_savepath,pred2_path,br_skel_path,BR_weight_path,aug, DTI, 
            start_model, start_epoch, file_path, file_root, gpu)
     
-    ###### DTI结果
+    ###### DTI
     best_epoch = valid_recall( './LOG/log_stage_two.txt')
     dtival( './saved_model/stage_two', './LOG/log_stage_two.txt',data_root,file_path,file_root,best_epoch,gpu)
 

@@ -96,7 +96,7 @@ class DropLayer(nn.Module):
         else:
             return x
 
-class DMR_UNet(nn.Module):
+class SE_UNet(nn.Module):
     def __init__(self, in_channel=1, n_classes=1):
         self.in_channel = in_channel
         self.n_classes = n_classes
@@ -104,7 +104,7 @@ class DMR_UNet(nn.Module):
         self.bias = True
         self.out_channel2 = 2
         self.sigmoid_output = 0
-        super(DMR_UNet, self).__init__()
+        super(SE_UNet, self).__init__()
         self.ec1 = SSEConv(self.in_channel, 8, self.out_channel2, bias=self.bias)
         self.ec2 = SSEConv(8, 16, self.out_channel2, bias=self.bias)
         self.ec3 = SSEConv(16, 32, self.out_channel2, bias=self.bias, dilation=2)
@@ -238,7 +238,7 @@ class DMR_UNet(nn.Module):
         return pred0, pred1
 
 def get_model():
-    net = DMR_UNet(in_channel=2)  
+    net = SE_UNet(in_channel=2)  
     return config, net
 
 if __name__ == '__main__':

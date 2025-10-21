@@ -2,6 +2,7 @@ import numpy as np
 import skimage.measure as measure
 import random
 import cc3d
+from scipy import ndimage
 from scipy.ndimage.morphology import binary_fill_holes
 import SimpleITK as sitk
 import pynvml
@@ -88,3 +89,77 @@ def get_gpu_mem_info(gpu_id=0):
     free = round(meminfo.free / 1024 / 1024, 2)
     # return total, used, free
     return free
+
+
+
+def th_2t(a,format='dcm'):
+    kmax=300
+    if format=='jpg':
+        kmax=50
+    hist=np.histogram(a.flatten(), kmax)
+    hist_y = hist[0]
+    hist_x = hist[1]
+    maxloc = np.where(hist_y == np.max(hist_y))
+    # print(maxLoc)
+    firstPeak = hist_x[maxloc[0][0]]  
+    measureDists = np.zeros([300], np.float32)
+    for k in range(kmax):
+        measureDists[k] = pow(hist_x[k + 1] - firstPeak, 2) * hist_y[k]  
+    maxloc2 = np.where(measureDists == np.max(measureDists))
+    secondPeak = hist_x[maxloc2[0][0]]  
+    if maxloc2[0][0]>maxloc[0][0]:
+        hist_y[maxloc2[0][0]::] = np.max(hist_y)
+        hist_y[0:maxloc[0][0]] = np.max(hist_y)
+    else:
+        hist_y[maxloc[0][0]::] = np.max(hist_y)
+        hist_y[0:maxloc2[0][0]] = np.max(hist_y)
+    T = hist_x[np.where(hist_y == np.min(hist_y))[0][0]]
+    return T
+
+
+def get_l(Array,T):
+
+    Asizes=Array.shape
+    L = np.zeros(Asizes, dtype=np.uint8)
+    for n in range(int(0.05 * Asizes[2]) - 1, int(0.95 * Asizes[2])):
+        A = np.zeros((Asizes[0], Asizes[1]), dtype=int)
+        for i in range(Asizes[0]):
+            for j in range(Asizes[1]):
+                if Array[i, j, n] >= T:
+                    A[i, j] = 1
+        imLabel, _ = measure.label(A, background=0, return_num=True) 
+        noback = np.bincount(imLabel.reshape(-1))  
+        noback[0] = 0
+        max_label = np.argmax(noback) 
+        img1 = (imLabel == max_label) 
+        img2 = binary_fill_holes(img1)
+        img3 = img1 ^ img2
+        imLabel, _ = measure.label(img3, background=0, return_num=True)
+        noback = np.bincount(imLabel.reshape(-1))
+        noback[0] = 0
+        max_label1 = np.argmax(noback) 
+        max_num1 = np.max(noback)
+        img11 = (imLabel == max_label1)  
+        noback[max_label1] = 0
+        max_label2 = np.argmax(noback) 
+        max_num2 = np.max(noback)
+        img22 = (imLabel == max_label2)  
+        if max_num1 > 2000:
+            L[:, :, n] = img11
+        if max_num2 > 2000:
+            L[:, :, n] = L[:, :, n] | img22
+
+    return L
+
+
+
+def large_connected_domain26(label):
+    cd=cc3d.connected_components(label, connectivity=26)
+    num=np.max(cd)
+    volume = np.zeros([num])
+    for k in range(num):
+        volume[k] = ((cd == (k + 1)).astype(np.uint8)).sum()
+    volume_sort = np.argsort(volume)
+    label = (cd == (volume_sort[-1] + 1)).astype(np.uint8)
+    label = ndimage.binary_fill_holes(label)
+    label = label.astype(np.uint8)

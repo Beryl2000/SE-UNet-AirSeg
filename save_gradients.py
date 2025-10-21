@@ -10,7 +10,7 @@ import torch
 import os
 import nibabel
 import SimpleITK as sitk
-from SE_UNet import DMR_UNet
+from SE_UNet import SE_UNet
 from data import load_json_file
 
 torch.manual_seed(777) # cpu
@@ -60,10 +60,10 @@ def process_img(data):
     data = (data + 1024) / 2048
     return data, data2
 
-def save_gradients_tw(data_root,stage_load,file_root,savepath,file_path,layer=0,gpu='0'):
+def save_gradients_tw(data_root,stage_load,file_root,savepath,file_path,layer=0,gpu='0',s1_epes=0):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
-    case_net = DMR_UNet(in_channel=2, n_classes=1)
-    weights_dict = torch.load(os.path.join(stage_load, 'DMR_UNet_99.pth'))
+    case_net = SE_UNet(in_channel=2, n_classes=1)
+    weights_dict = torch.load(os.path.join(stage_load, 'SE_UNet_{}.pth'.format(s1_epes-1)))
     case_net.load_state_dict(weights_dict, strict=False)
     case_net = torch.nn.DataParallel(case_net).cuda()
     case_net.cuda()
@@ -74,11 +74,12 @@ def save_gradients_tw(data_root,stage_load,file_root,savepath,file_path,layer=0,
     file_list.sort()
     for idx in range(len(file_list)):
         name = file_list[idx]
-        img = sitk.ReadImage(data_root+'/data/'+name+ 'data_cut' + '.nii.gz')
-        img = sitk.GetArrayFromImage(img)
+        img0 = sitk.ReadImage(data_root+'/data/'+name+ 'data_cut' + '.nii.gz')
+        img0 = sitk.GetArrayFromImage(img0)
+        img0=img0-1024
         label = sitk.ReadImage(data_root+'/mask/'+name+ 'mask_cut' + '.nii.gz')
         label = sitk.GetArrayFromImage(label)
-        img, img2 = process_img(img)
+        img, img2 = process_img(img0)
         weight = np.load(os.path.join(file_root+'/LIB_weight', name+'.npy'))
 
         # calculate gradients

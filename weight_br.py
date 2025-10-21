@@ -8,7 +8,7 @@ import re
 import pynvml
 from scipy import ndimage
 from skimage.morphology import skeletonize_3d,binary_dilation
-from SE_UNet import DMR_UNet
+from SE_UNet import SE_UNet
 from data import load_json_file
 
 torch.manual_seed(777) # cpu
@@ -27,28 +27,30 @@ def process_img(data):
     return data, data2
 
 
-def save_s2_pred(data_root, whichepoch, savepath, file_root, gpu):
+def save_s2_pred(data_root, whichepoch, savepath,file_path, gpu):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
 
-    case_net = DMR_UNet(in_channel=2, n_classes=1)
+    case_net = SE_UNet(in_channel=2, n_classes=1)
     weights_dict = torch.load(whichepoch)
     case_net.load_state_dict(weights_dict, strict=False)
     case_net.cuda()
     case_net.train()
     # load data
-    file_list = load_json_file(file_root + '/base_dict.json',
+    file_list = load_json_file( file_path,
                                 folder='0',
                                 mode=['train', 'val'])
     file_list.sort()
     for idx in range(len(file_list)):
         name = file_list[idx]
-        img = sitk.ReadImage(data_root + '/data/' + name + 'data_cut' +
+        img0 = sitk.ReadImage(data_root + '/data/' + name + 'data_cut' +
                              '.nii.gz')
-        img = sitk.GetArrayFromImage(img)
+        img0 = sitk.GetArrayFromImage(img0)
+        img0=img0-1024
+
         label = sitk.ReadImage(data_root + '/mask/' + name + 'mask_cut' +
                                '.nii.gz')
         label = sitk.GetArrayFromImage(label)
-        img, img2 = process_img(img)
+        img, img2 = process_img(img0)
 
         # calculate gradients
         img = img[np.newaxis, np.newaxis, ...]
@@ -108,35 +110,31 @@ def save_s2_pred(data_root, whichepoch, savepath, file_root, gpu):
                      os.path.join(os.path.join(savepath, name + '.nii.gz')))
 
 
-def save_weight_break(data_root,savepath,savepath2,savepath3,file_root):
+def save_weight_break(data_root,savepath,savepath2,savepath3,file_path):
     if not os.path.exists(savepath2):
         os.mkdir(savepath2)
     if not os.path.exists(savepath3):
         os.mkdir(savepath3)
 
-    file_list = load_json_file(file_root+'/base_dict.json', folder='0', mode=['train', 'val'])
+    file_list = load_json_file(file_path, folder='0', mode=['train', 'val'])
     file_list.sort()
     for i in range(len(file_list)):
-        #load the label, predition and gradient
         name = file_list[i]
         label = sitk.ReadImage(data_root+'/mask/'+name+ 'mask_cut' + '.nii.gz')
         label = sitk.GetArrayFromImage(label)
         pred = nibabel.load(os.path.join(savepath, name+'.nii.gz'))
-        pred = pred.get_data()[0]
-        # grad = np.load(os.path.join('./data/LIBBP/grads', name+'.npy'))
-
-        fn = ((label.astype(np.float16) - pred)>0).astype(np.uint8) #fn是没有被分割出来的气管像素
+        pred = pred.get_fdata()[0]
+        fn = ((label.astype(np.float16) - pred)>0).astype(np.uint8) 
         skeleton = skeletonize_3d(label)
-        # fn_skel = (1-grad)*fn*skeleton
-        fn_skel = fn*skeleton #fn_skel是没有被分割出来的气管骨架
+        fn_skel = fn*skeleton 
 
-        ################################### w_hm计算
+        ################################### w_hm
         edt, inds = ndimage.distance_transform_edt(1-skeleton, return_indices=True)
-        hard_mining = fn_skel[inds[0,...], inds[1,...], inds[2,...]] * label #grad_wgt0是没有被分割出来的气管骨架又膨胀回label内容
-        loc = (hard_mining>0).astype(np.uint8) #same  with  grad_wgt0
-        f = loc * edt #f是没有被分割出来的气管距离grad_fn_skel的大小
-        f = f * (1. - skeleton)#f是没有被分割出来的气管（除了骨架线上的点）距离grad_fn_skel的大小
-        maxf = np.amax(f) #这个距离的max是来自全局没有被检测出来的
+        hard_mining = fn_skel[inds[0,...], inds[1,...], inds[2,...]] * label 
+        loc = (hard_mining>0).astype(np.uint8)
+        f = loc * edt 
+        f = f * (1. - skeleton)
+        maxf = np.amax(f) 
         if np.max(maxf)==0:
             w_br=np.zeros(label.shape,dtype=np.float16)
             br_skel=np.zeros(label.shape)
@@ -145,13 +143,13 @@ def save_weight_break(data_root,savepath,savepath2,savepath3,file_root):
             np.save(os.path.join(savepath3, name+'.npy'), br_skel)
             print(name)
             continue
-        D = -((1./(maxf)) * f) + 1 #D是1-f/max
-        D = D * loc #靠近中心的更大
+        D = -((1./(maxf)) * f) + 1
+        D = D * loc
 
-        w_hm = (hard_mining**2)*(D**2)#就是Wdi
+        w_hm = (hard_mining**2)*(D**2)
         w_hm = w_hm.astype(np.float16)
 
-        ################################### w_br计算
+        ################################### w_br
         cd=cc3d.connected_components(fn_skel, connectivity=26)
         br_skel=np.zeros(cd.shape)
         for i in range(1,np.max(cd)+1):
@@ -163,7 +161,7 @@ def save_weight_break(data_root,savepath,savepath2,savepath3,file_root):
                 continue
             # print(i)
             br_skel+=t
-        br_label = br_skel[inds[0,...], inds[1,...], inds[2,...]] * label #grad_wgt0是没有被分割出来的气管骨架又膨胀回label内容
+        br_label = br_skel[inds[0,...], inds[1,...], inds[2,...]] * label 
         edt, inds = ndimage.distance_transform_edt(1-(binary_dilation(br_label)-br_label), return_indices=True)
         w_br=br_label*edt
         w_br[w_br>=2]=2
@@ -245,7 +243,7 @@ if __name__ == '__main__':
 
     log_path = './LOG/log_stage_two.txt'
     epoch = valid_recall(log_path)
-    whichepoch = './saved_model/stage_two/DMR_UNet_{}.pth'.format(epoch)
+    whichepoch = './saved_model/stage_two/SE_UNet_{}.pth'.format(epoch)
     savepath='./data/pred_2'
     file_root='./data'
     data_root='/mnt/yby/AFTER_PREPROCESS'

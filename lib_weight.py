@@ -55,4 +55,4 @@ def save_lib_weight(label_path, save_path):
         
 if __name__ == '__main__':
 
-    save_lib_weight('/mnt/yby/CT_DATASET_BAS_90/mask', './data/LIB_weight')
+    save_lib_weight('AFTER_DATA/mask', './data/LIB_weight')

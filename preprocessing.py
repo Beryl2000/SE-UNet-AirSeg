@@ -5,6 +5,8 @@ import SimpleITK as sitk
 import warnings
 from glob import glob
 import re
+import pydicom
+import pylab
 from util import *
 
 def load_itk_image(filename):
@@ -14,87 +16,7 @@ def load_itk_image(filename):
     numpySpacing = list(itkimage.GetSpacing())
     return numpyImage, numpyOrigin, numpySpacing
 
-def load_dcm_image(Path,multides):
-    if multides==False:
-        s = [
-            pydicom.read_file(os.path.join(Path, s), force=True)
-            for s in os.listdir(Path)
-        ]
-        s.sort(key=lambda x: float(x.ImagePositionPatient[2]))
-        print('共', len(s), '张')
-        ConstPixelDims = (int(s[0].Rows), int(s[0].Columns), len(s))
-        Array = np.zeros(ConstPixelDims,
-                            dtype=s[0].pixel_array.dtype)  # uint16类型
-        for n in range(len(s)):
-            Array[:, :, n] = s[n].pixel_array
-        #     c.writelines([descri,'\n'])
-        pz = np.abs(s[0].ImagePositionPatient[2] - s[1].ImagePositionPatient[2])
-        px = float(s[0].PixelSpacing[0])
-        py = float(s[0].PixelSpacing[1])
-        spacing = (px, py, pz)
-        print('像素大小为', spacing)
-        origin = tuple(np.array(s[0].ImagePositionPatient))
-        print('原点为', origin)
-        intercept = s[0].RescaleIntercept  # 缩放截距 -1024
-        slope = s[0].RescaleSlope  # 缩放斜率 1
-        Array = Array * int(slope) + int(intercept) * np.ones(
-            ConstPixelDims, dtype=s[0].pixel_array.dtype)
-    else:
-        slices = [pydicom.read_file(os.path.join(Path, s), force=True) for s in os.listdir(Path)]
-        for si in range(len(slices)):
-            if hasattr(slices[si], 'SeriesDescription'):
-                ss_set=set(slices[si].SeriesDescription)
-                break
-        for ss in slices[1:]:
-            if hasattr(ss, 'SeriesDescription'):
-                ss_set.add(ss.SeriesDescription)
-        ss_list=list(ss_set)
-        ss_list.sort()
-        for i in range(len(ss_list)):
-            print(i,':',ss_list[i], '\n', end="")
-        nice=0
-        while nice ==0:
-            des = int(input('请选择第几个描述：'))
-            s=[x for x in slices if (hasattr(x, 'SeriesDescription')) and (x.SeriesDescription == ss_list[des])]
-            s.sort(key=lambda x: float(x.ImagePositionPatient[2]))
-            print('共',len(s),'张')
-            if len(s)==0:
-                continue
-            ConstPixelDims = (int(s[0].Rows), int(s[0].Columns), len(s))
-            Array = np.zeros(ConstPixelDims, dtype=s[0].pixel_array.dtype)  # uint16类型
-            for n in range(len(s)):
-                Array[:, :, n] = s[n].pixel_array
-            pylab.figure(1)
-            pylab.imshow(Array[:,200,:],"gray")
-            pylab.ion()
-            pylab.pause(2)  #显示秒数
-            pylab.close()
-            nice = int(input('确定选择这个描述：'))
-        pz = np.abs(s[0].ImagePositionPatient[2] - s[1].ImagePositionPatient[2])
-        px = float(s[0].PixelSpacing[0])
-        py = float(s[0].PixelSpacing[1])
-        spacing=(px,py,pz)
-        print('像素大小为',spacing)
-        origin = tuple(np.array(s[0].ImagePositionPatient))
-        print('原点为', origin)
-        intercept = s[0].RescaleIntercept  # 缩放截距 -1024
-        slope = s[0].RescaleSlope  # 缩放斜率 1
-        Array = Array * int(slope) + int(intercept) * np.ones(ConstPixelDims, dtype=s[0].pixel_array.dtype)
-    return Array,origin,spacing
-
 def save_itk(image, origin, spacing, filename):
-    """
-	:param image: images to be saved
-	:param origin: CT origin
-	:param spacing: CT spacing
-	:param filename: save name
-	:return: None
-	:param image:要保存的图像
-	:param原点:CT原点
-	:param spacing:CT间距
-	:param filename:保存名称
-	:return:无
-	"""
 
     itkimage = sitk.GetImageFromArray(image)
     itkimage.SetSpacing(spacing)
@@ -102,14 +24,7 @@ def save_itk(image, origin, spacing, filename):
     sitk.WriteImage(itkimage, filename)
 
 def savenpy(data_path, prep_folder, format='nii.gz', mode='prepro', multides=True):
-    """
-	:param data_path: input CT data path
-	:param prep_folder:
-	:return: None
-	:param data_path:输入CT数据路径
-	:param prep_folder:
-	:return:无
-	"""
+
     resolution = np.array([1, 1, 1])
     # name = data_path.split('/')[-1].split('.nii')[0]
     name = data_path.split('/')[-1].split('data.nii')[0]
@@ -128,8 +43,6 @@ def savenpy(data_path, prep_folder, format='nii.gz', mode='prepro', multides=Tru
             case_pixels = case_pixels.transpose(1, 2, 0)
         elif a == c:
             case_pixels = case_pixels.transpose(0, 2, 1)
-    if format == 'dcm':
-        case_pixels, origin, spacing = load_dcm_image(data_path, multides)
 
     case_pixels=case_pixels+1024
     cmin = np.min(case_pixels)
@@ -143,22 +56,20 @@ def savenpy(data_path, prep_folder, format='nii.gz', mode='prepro', multides=Tru
         hhh0 = hist[0][np.where(hist[1] >= th)[0][0]:]
         maxloc = np.where(hhh0 == np.max(hhh0))
         # print(maxLoc)
-        firstPeak = hhh1[maxloc[0][0]]  # 灰度值
+        firstPeak = hhh1[maxloc[0][0]] 
         measureDists = np.zeros([300], np.float32)
         for k in range(hhh0.shape[0]):
             measureDists[k] = pow(hhh1[k + 1] - firstPeak,
-                                  2) * hhh0[k]  # 综合考虑 两峰距离与峰值
+                                  2) * hhh0[k]  
         maxloc2 = np.where(measureDists == np.max(measureDists))
-        secondPeak = hhh1[maxloc2[0][0]]  # 灰度值
+        secondPeak = hhh1[maxloc2[0][0]] 
         aaa = firstPeak
         if secondPeak < firstPeak:
             aaa = secondPeak
         case_pixels[np.where(
             case_pixels <=
-            th)] = aaa  
+            th)] = aaa
         cmax = np.max(case_pixels)
-
-
 
     if mode == 'prepro':
         T = th_2t(case_pixels)
@@ -225,11 +136,6 @@ def preprocess_CT(inputpath=None, savepath=None,format='nii.gz',mode='prepro',mu
 	:param inputpath: input data path
 	:param savepath: output save path
 	:return: save directory path
-	:对输入路径中的CT图像进行预处理以提取肺野
-	:在保存路径中保存处理后的图像
-	:param inputpath:输入数据路径
-	:param savepath:输出保存路径
-	:return:保存目录路径
 	"""
     warnings.filterwarnings("ignore")
     warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -241,7 +147,7 @@ def preprocess_CT(inputpath=None, savepath=None,format='nii.gz',mode='prepro',mu
             filelist = glob(os.path.join(inputpath, '*.nii*'))  # default nifty format
             filelist.sort()
             print (inputpath, filelist)
-            for curfilepath in filelist:######################################################################################
+            for curfilepath in filelist:
                 start_time = time.time()
                 print ('starting preprocessing lung CT')
                 savenpy(data_path=curfilepath, prep_folder=savepath,format=format,mode=mode)
@@ -253,14 +159,6 @@ def preprocess_CT(inputpath=None, savepath=None,format='nii.gz',mode='prepro',mu
             savenpy(data_path=inputpath, prep_folder=savepath,format=format,mode=mode)
             end_time = time.time()
             print ('end preprocessing lung CT, time %d seconds'%(end_time-start_time))
-
-    if format=='dcm':
-        start_time = time.time()
-        print ('starting preprocessing lung CT')
-        savenpy(data_path=inputpath, prep_folder=savepath,format=format,mode=mode,multides=multides)
-        end_time = time.time()
-        print ('end preprocessing lung CT, time %d seconds'%(end_time-start_time))
-
 
 
     return savepath
@@ -285,11 +183,10 @@ def preprocess_mask(inputpath=None, savepath=None):
 
 if __name__ == '__main__':
 
-    inputpath = '/mnt/yby/AIIB23_Train_T1/img'
-    savepath = '/mnt/yby/AFTER_PREPROCESS/data'
-    inputpath2 = '/mnt/yby/AIIB23_Train_T1/gt'
-    savepath2 = '/mnt/yby/AFTER_PREPROCESS/mask'
+    inputpath = 'BEFORE_DATA/data'
+    savepath = 'AFTER_DATA/data'
+    inputpath2 = 'BEFORE_DATA/mask'
+    savepath2 = 'AFTER_DATA/mask'
 
     preprocess_CT(inputpath, savepath)
     preprocess_mask(inputpath2, savepath2)
-

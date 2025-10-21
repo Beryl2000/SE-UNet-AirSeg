@@ -121,6 +121,41 @@ def small_airway_sample(img, label, weight, loc, cube_size):
                          start[2]:start[2] + crop_size[2]]
     return img_crop, label_crop, weight_crop
 
+def hard_sample(img, label, weight, loc_skeleton, loc_small, cube_size):
+    origin_size = img.shape
+    crop_size = np.array([cube_size, cube_size, cube_size])
+
+    if np.random.random() > 0.5 and len(loc_skeleton[0]) > 0:
+        loc = loc_skeleton
+    elif len(loc_small[0]) > 0:
+        loc = loc_small
+    else:
+        x = np.random.randint(0, origin_size[0] - cube_size)
+        y = np.random.randint(0, origin_size[1] - cube_size)
+        z = np.random.randint(0, origin_size[2] - cube_size)
+        return (
+            img[x:x+cube_size, y:y+cube_size, z:z+cube_size],
+            label[x:x+cube_size, y:y+cube_size, z:z+cube_size],
+            weight[x:x+cube_size, y:y+cube_size, z:z+cube_size],
+        )
+
+    random_loc = np.random.randint(len(loc[0]))
+    start = [
+        np.random.randint(max(0, loc[0][random_loc] - cube_size // 2), loc[0][random_loc] + cube_size // 2),
+        np.random.randint(max(0, loc[1][random_loc] - cube_size // 2), loc[1][random_loc] + cube_size // 2),
+        np.random.randint(max(0, loc[2][random_loc] - cube_size // 2), loc[2][random_loc] + cube_size // 2)
+    ]
+
+    for i in range(3):
+        if (start[i] + cube_size) > origin_size[i]:
+            start[i] = origin_size[i] - cube_size
+
+    img_crop = img[start[0]:start[0]+cube_size, start[1]:start[1]+cube_size, start[2]:start[2]+cube_size]
+    label_crop = label[start[0]:start[0]+cube_size, start[1]:start[1]+cube_size, start[2]:start[2]+cube_size]
+    weight_crop = weight[start[0]:start[0]+cube_size, start[1]:start[1]+cube_size, start[2]:start[2]+cube_size]
+
+    return img_crop, label_crop, weight_crop
+
 def random_sample(img, label, weight, cube_size):
     origin_size = img.shape
     crop_size = [cube_size, cube_size, cube_size]
@@ -234,6 +269,17 @@ class AirwayHMData(Dataset):
         self.cube_size = cube_size
         self.aug_flag = aug_flag
 
+
+        # Random : Hard = 7 : 3
+        self.random_ratio = 0.7
+        self.hard_ratio = 0.3
+
+        # scheduler 
+        self.decay_step = 5          # 每 5 epoch 调整一次
+        self.decay_rate = 0.05         # 每次 Hard 比例增加 10%
+        self.max_hard_ratio = 0.8     # 上限
+        self.min_hard_ratio = 0.2     # 下限
+
     def __len__(self):
         return len(self.file_list)
 
@@ -254,42 +300,55 @@ class AirwayHMData(Dataset):
 
     def crop(self, img, label, weight, pred, skeleton, parsing):
         img_crops, label_crops, weight_crops = [], [], []
+
         dis = ndimage.distance_transform_edt(label)
         loc_small = np.where((dis * skeleton) < 2)
         loc_skeleton = np.where(skeleton * (1 - pred))
+
         cube_size = self.cube_size
-        if (pred * skeleton).sum() == skeleton.sum():
-            for i in range(self.batch_size):
-                p = np.random.random()
-                if p > 0.5:
-                    img_crop, label_crop, weight_crop = small_airway_sample(
-                        img, label, weight, loc_small, cube_size)
-                else:
-                    img_crop, label_crop, weight_crop = random_sample(
-                        img, label, weight, self.cube_size)
-                img_crops.append(img_crop)
-                label_crops.append(label_crop)
-                weight_crops.append(weight_crop)
-        else:
-            for i in range(self.batch_size):
-                p = np.random.random()
-                # skeleton hard sample mining
-                if p > 0.5:
-                    img_crop, label_crop, weight_crop = skeleton_sample(
-                        img, label, weight, loc_skeleton, cube_size)
-                # sample on small airway
-                elif p > 0.25:
-                    img_crop, label_crop, weight_crop = small_airway_sample(
-                        img, label, weight, loc_small, cube_size)
-                # random sampling
-                else:
-                    img_crop, label_crop, weight_crop = random_sample(
-                        img, label, weight, self.cube_size)
-                img_crops.append(img_crop)
-                label_crops.append(label_crop)
-                weight_crops.append(weight_crop)
+
+        # -------- 核心采样循环 --------
+        for _ in range(self.batch_size):
+            # 按当前动态比例选择
+            if np.random.random() < self.hard_ratio:
+                # Hard mining（50% skeleton / 50% small airway）
+                img_crop, label_crop, weight_crop = hard_sample(
+                    img, label, weight, loc_skeleton, loc_small, cube_size
+                )
+            else:
+                # Random crop
+                img_crop, label_crop, weight_crop = random_sample(img, label, weight, cube_size)
+
+            img_crops.append(img_crop)
+            label_crops.append(label_crop)
+            weight_crops.append(weight_crop)
 
         return img_crops, label_crops, weight_crops
+
+
+    def update_scheduler(self, epoch, val_loss_random_list, val_loss_hard_list, val_td_list, val_bd_list):
+        if epoch % self.decay_step == 0 and epoch != 0:
+            window = min(3, len(val_loss_random_list))
+            avg_random = np.mean(val_loss_random_list[-window:])
+            avg_hard = np.mean(val_loss_hard_list[-window:])
+            diff = avg_random - avg_hard
+
+            if len(val_td_list) > 1:
+                td_trend = val_td_list[-1] - val_td_list[-2]
+                bd_trend = val_bd_list[-1] - val_bd_list[-2]
+            else:
+                td_trend = bd_trend = 0.0
+
+            print(f"[Scheduler] Epoch {epoch}: diff={diff:.4f}, TD_trend={td_trend:.4f}, BD_trend={bd_trend:.4f}")
+
+            if diff > 0.04 or td_trend < 0 or bd_trend < 0:
+                self.hard_ratio = min(self.max_hard_ratio, self.hard_ratio + self.decay_rate)
+            elif diff < 0.02 and td_trend >= 0 and bd_trend >= 0:
+                self.hard_ratio = max(self.min_hard_ratio, self.hard_ratio - self.decay_rate)
+            elif diff > 0.05 or td_trend < -1 or bd_trend < -1:
+                self.hard_ratio = max(self.min_hard_ratio, self.hard_ratio - self.decay_rate)
+
+            print(f"[Scheduler] Updated hard_ratio -> {self.hard_ratio:.2f}")
 
     def augment(self, data_list):
         if random.random() > 0.5:
@@ -299,7 +358,6 @@ class AirwayHMData(Dataset):
             result = random_rotate(data_list)
             data_list = result
         return data_list
-        #     是增加
 
     def __getitem__(self, item):
         name = self.file_list[item]
@@ -332,7 +390,7 @@ class AirwayHMData(Dataset):
             img, label, weight, pred, skeleton, parsing)
         img_crops, img2_crops = self.process_img(img_crops)
         data_list = [img_crops, img2_crops, label_crops, weight_crops]
-        if self.aug_flag == 2:
+        if self.aug_flag == 1:
             for i in range(len(data_list[0])):
                 _aug = self.augment(
                     [data_list[j][i] for j in range(len(data_list))])
@@ -363,6 +421,15 @@ class AirwayHMData3(Dataset):
         self.cube_size = cube_size
         self.aug_flag = aug_flag
 
+        self.hard_ratio = 0.8       # Hard + Break 总体比例
+        self.break_ratio = 0.625    # Hard 内 Break占比（0.5 / 0.8）
+        self.min_hard_ratio = 0.2
+        self.max_hard_ratio = 0.8
+        self.min_break_ratio = 0.2
+        self.max_break_ratio = 0.8
+        self.decay_rate = 0.05
+        self.decay_step = 5        # 每10 epoch更新一次
+
     def __len__(self):
         return len(self.file_list)
 
@@ -381,44 +448,91 @@ class AirwayHMData3(Dataset):
             img_crops[i] = crop
         return img_crops, img2_crops
 
-    def crop(self, img, label, weight, pred, skeleton, parsing,br_skel):
-        img_crops, label_crops, weight_crops,skel_crops = [], [], [],[]
+    def crop(self, img, label, weight, pred, skeleton, parsing, br_skel):
+        """
+        Stage 3 crop: Dynamic sampling including Random, Hard, and Break samples.
+        """
+        img_crops, label_crops, weight_crops, skel_crops = [], [], [], []
+
         dis = ndimage.distance_transform_edt(label)
         loc_small = np.where((dis * skeleton) < 2)
         loc_skeleton = np.where(skeleton * (1 - pred))
-        loc_break=br_skel
+        loc_break = br_skel  # 已经是 break skeleton 的 mask
         cube_size = self.cube_size
-        if (pred * skeleton).sum() == skeleton.sum():
-            for i in range(self.batch_size):
-                p = np.random.random()
-                if p > 0.5:
-                    img_crop, label_crop, weight_crop,skel_crop = small_airway_sample_wg(img, label, weight,skeleton, loc_small, cube_size)
-                else:
-                    img_crop, label_crop, weight_crop,skel_crop = random_sample_wg(img, label, weight, skeleton,self.cube_size)
-                img_crops.append(img_crop)
-                label_crops.append(label_crop)
-                weight_crops.append(weight_crop)
-                skel_crops.append(skel_crop)
-        else:
-            for i in range(self.batch_size):
-                p = np.random.random()
-                if p > 0.6: #40
-                    if len(loc_break[0])!=0:
-                        img_crop, label_crop, weight_crop,skel_crop = break_sample_wg(img, label, weight, skeleton,loc_break, cube_size)
-                    else:
-                        img_crop, label_crop, weight_crop,skel_crop = skeleton_sample_wg(img, label, weight, skeleton,loc_skeleton, cube_size)
-                elif p > 0.4: #20
-                    img_crop, label_crop, weight_crop,skel_crop = small_airway_sample_wg(img, label, weight,skeleton, loc_small, cube_size)
-                elif p > 0.2: #20
-                    img_crop, label_crop, weight_crop,skel_crop = skeleton_sample_wg(img, label, weight, skeleton,loc_skeleton, cube_size)
-                else:         #20
-                    img_crop, label_crop, weight_crop,skel_crop = random_sample_wg(img, label, weight,skeleton, self.cube_size)
-                img_crops.append(img_crop)
-                label_crops.append(label_crop)
-                weight_crops.append(weight_crop)
-                skel_crops.append(skel_crop)
 
-        return img_crops, label_crops, weight_crops,skel_crops
+        for _ in range(self.batch_size):
+            # ----------------- Random vs Hard+Break -----------------
+            if np.random.random() < self.hard_ratio:
+                # ----------------- Hard mining -----------------
+                if np.random.random() < self.break_ratio and len(loc_break[0]) != 0:
+                    # Break sample
+                    img_crop, label_crop, weight_crop, skel_crop = break_sample_wg(
+                        img, label, weight, skeleton, loc_break, cube_size
+                    )
+                else:
+                    # Skeleton 或 Small airway
+                    if np.random.random() < 0.5:
+                        img_crop, label_crop, weight_crop, skel_crop = small_airway_sample_wg(
+                            img, label, weight, skeleton, loc_small, cube_size
+                        )
+                    else:
+                        img_crop, label_crop, weight_crop, skel_crop = skeleton_sample_wg(
+                            img, label, weight, skeleton, loc_skeleton, cube_size
+                        )
+            else:
+                # ----------------- Random crop -----------------
+                img_crop, label_crop, weight_crop, skel_crop = random_sample_wg(
+                    img, label, weight, skeleton, cube_size
+                )
+
+            img_crops.append(img_crop)
+            label_crops.append(label_crop)
+            weight_crops.append(weight_crop)
+            skel_crops.append(skel_crop)
+
+        return img_crops, label_crops, weight_crops, skel_crops
+
+    def update_scheduler(self, epoch, val_loss_random_list, val_loss_hard_list, val_td_list, val_bd_list):
+        """
+        Adaptive adjustment of hard_ratio and break_ratio according to validation metrics.
+        """
+        if epoch % self.decay_step != 0 or epoch == 0:
+            return  # only update every decay_step
+
+        # ------------------ Compute average losses ------------------
+        window = min(3, len(val_loss_random_list))
+        avg_random = np.mean(val_loss_random_list[-window:])
+        avg_hard = np.mean(val_loss_hard_list[-window:])
+        diff = avg_random - avg_hard
+
+        # Compute TD/BD trends
+        if len(val_td_list) > 1:
+            td_trend = val_td_list[-1] - val_td_list[-2]
+            bd_trend = val_bd_list[-1] - val_bd_list[-2]
+        else:
+            td_trend = bd_trend = 0.0
+
+        print(f"[Scheduler] Epoch {epoch}: diff={diff:.4f}, TD_trend={td_trend:.4f}, BD_trend={bd_trend:.4f}")
+
+        # ------------------ Adjust hard_ratio ------------------
+        step = self.decay_rate
+        if diff > 0.04 or td_trend < 0 or bd_trend < 0:
+            # Hard examples are worse or tree quality decreased → increase Hard ratio
+            self.hard_ratio = min(self.max_hard_ratio, self.hard_ratio + step)
+        elif diff < 0.02 and td_trend >= 0 and bd_trend >= 0:
+            # Hard close to overall and tree improving → decrease Hard ratio
+            self.hard_ratio = max(self.min_hard_ratio, self.hard_ratio - step)
+        # else: keep unchanged
+
+        # ------------------ Adjust break_ratio within Hard ------------------
+        # Simple rule: if TD/BD trend < 0, increase break_ratio to focus on break points
+        if td_trend < 0 or bd_trend < 0:
+            self.break_ratio = min(self.max_break_ratio, self.break_ratio + step)
+        elif td_trend > 0 and bd_trend > 0:
+            self.break_ratio = max(self.min_break_ratio, self.break_ratio - step)
+        # else: keep unchanged
+
+        print(f"[Scheduler] Updated hard_ratio -> {self.hard_ratio:.2f}, break_ratio -> {self.break_ratio:.2f}")
 
     def augment(self, data_list):
         if random.random() > 0.5:
@@ -428,7 +542,6 @@ class AirwayHMData3(Dataset):
             result = random_rotate(data_list)
             data_list = result
         return data_list
-        #     是增加
 
     def __getitem__(self, item):
         name = self.file_list[item]
@@ -458,7 +571,7 @@ class AirwayHMData3(Dataset):
         img_crops, label_crops, weight_crops,skel_crops = self.crop(img, label, weight, pred, skeleton, parsing,br_skel)
         img_crops, img2_crops = self.process_img(img_crops)
         data_list = [img_crops, img2_crops, label_crops, weight_crops,skel_crops]
-        if self.aug_flag==2:
+        if self.aug_flag==1:
             for i in range(len(data_list[0])):
                 _aug = self.augment([data_list[j][i] for j in range(len(data_list))])
                 for j in range(len(data_list)):
@@ -536,9 +649,6 @@ class CropSegData(Dataset):
         shape = _data.shape
         random_range = [[crop_size[i]//2, shape[i]-crop_size[i]//2] for i in range(3)]
         random_center = []
-        for i in range(3):
-            if random_range[i][0]>random_range[i][1]:
-                sd=3
         for i in range(self.batch_size):
             z = random.randint(random_range[0][0], random_range[0][1])
             y = random.randint(random_range[1][0], random_range[1][1])
@@ -592,7 +702,7 @@ class CropSegData(Dataset):
         img, img2, label = self.process_imgmsk(img, label)
         weight = weight ** (np.random.random() + 2) * label + (1 - label)
         data_list = self.crop([img, img2, label, weight])
-        if self.aug_flag==2:
+        if self.aug_flag==1:
 
             for i in range(len(data_list[0])):
                 _aug = self.augment([data_list[j][i] for j in range(len(data_list))])

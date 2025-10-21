@@ -8,7 +8,7 @@ import skimage.measure as measure
 import SimpleITK as sitk
 from matplotlib.pyplot import MultipleLocator
 from torch.utils.data import DataLoader
-from SE_UNet import DMR_UNet
+from SE_UNet import SE_UNet
 from data import SegTestCropData
 from metrics import *
 from util import *
@@ -71,7 +71,7 @@ def test(data_root, model_stage, best_epoch, testlog_savepath, result_savepath,
     def worker_init_fn(worker_id):
         np.random.seed(1 + worker_id)
 
-    model = DMR_UNet(in_channel=2, n_classes=1)
+    model = SE_UNet(in_channel=2, n_classes=1)
 
     test_dataset = SegTestCropData(file_path,
                                    data_root,
@@ -86,7 +86,7 @@ def test(data_root, model_stage, best_epoch, testlog_savepath, result_savepath,
                                  drop_last=True)
 
     weights_dict = torch.load(model_stage +
-                              '/DMR_UNet_{}.pth'.format(best_epoch))
+                              '/SE_UNet_{}.pth'.format(best_epoch))
     model.load_state_dict(weights_dict, strict=False)
     model = torch.nn.DataParallel(model).cuda()
     model.train()

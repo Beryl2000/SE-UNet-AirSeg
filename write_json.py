@@ -8,7 +8,7 @@ from util import *
 import json
 
 
-inputpath = '/mnt/yby/CT_DATASET_BAS_90/mask'
+inputpath = 'AFTER_DATA/mask'
 
 flist0=os.listdir(inputpath)
 flist0.sort()
@@ -20,9 +20,9 @@ train_list=[]
 val_list=[]
 test_list=[]
 
-trainnum=50
-valnum=20
-testnum=20
+trainnum=35
+valnum=10
+testnum=10
 for f in flist[0:trainnum]:
     train_list.append(f.split('mask')[0]+'.nii.gz')
 
