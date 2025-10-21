@@ -138,8 +138,8 @@ def save_data_online3(path, image, label, weight, skel,names, limits=1500):
             np.save(os.path.join(path, 'skel', names[i]), skel[i].astype(np.int8))
 
 def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,br_skel_path,BR_weight_path,aug, DTI,start_model, start_epoch, file_path, file_root, gpu):
-    max_epoches = 10
-    batch_size =2
+    max_epoches = 50
+    batch_size =8
     aug_flag = aug  
 
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
@@ -173,11 +173,11 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
                                    drop_last=True)
     valid_dataset = SegValCropData(file_path,
                                    data_root,
-                                   batch_size=2,
+                                   batch_size=24,
                                    cube_size=128,
                                    step=64)
     valid_dataloader = DataLoader(dataset=valid_dataset,
-                                  batch_size=2,
+                                  batch_size=24,
                                   shuffle=False,
                                   num_workers=10,
                                   pin_memory=True,
@@ -867,34 +867,33 @@ if __name__ == '__main__':
     log_savepath = './LOG/log_stage_one.txt'
     aug = 1 
     DTI = 1 
-    # s1_epes=train(data_root, model_savepath, log_savepath, aug, DTI, file_path,file_root, gpu)
+    s1_epes=train(data_root, model_savepath, log_savepath, aug, DTI, file_path,file_root, gpu)
 
     ###################################### STAGE_1_PRED
     pred1_path = './data/pred_1'
-    # save_gradients_tw(data_root,stage_load=model_savepath,file_root=file_root,savepath=pred1_path,file_path=file_path,layer=0,gpu=gpu,s1_epes=s1_epes)
+    save_gradients_tw(data_root,stage_load=model_savepath,file_root=file_root,savepath=pred1_path,file_path=file_path,layer=0,gpu=gpu,s1_epes=s1_epes)
 
     ###################################### TRAIN_STAGE_2
-    # start_model = './saved_model/stage_one/'
-    # start_epoch = s1_epes-1
+    start_model = './saved_model/stage_one/'
+    start_epoch = s1_epes-1
 
-    # data_root = 'AFTER_DATA'
-    # model_savepath = './saved_model/stage_two'
-    # online_savepath = './data/online_hardmining_stage_two'
-    # log_savepath = './LOG/log_stage_two.txt'
-    # aug = 1  
-    # DTI = 0
-    # train2(data_root, model_savepath, online_savepath, log_savepath,pred1_path, aug, DTI, start_model, start_epoch, file_path, file_root, gpu)
+    data_root = 'AFTER_DATA'
+    model_savepath = './saved_model/stage_two'
+    online_savepath = './data/online_hardmining_stage_two'
+    log_savepath = './LOG/log_stage_two.txt'
+    aug = 1  
+    DTI = 0
+    train2(data_root, model_savepath, online_savepath, log_savepath,pred1_path, aug, DTI, start_model, start_epoch, file_path, file_root, gpu)
 
     ###################################### STAGE_2_PRED/BR-wi/br_skel
-    # epoch = valid_recall(log_savepath)
-    epoch=65
+    epoch = valid_recall(log_savepath)
     whichepoch = './saved_model/stage_two/SE_UNet_{}.pth'.format(epoch)
     pred2_path = './data/pred_2'
-    # save_s2_pred(data_root, whichepoch, pred2_path, file_path,gpu)
+    save_s2_pred(data_root, whichepoch, pred2_path, file_path,gpu)
 
     BR_weight_path = './data/BR_weight'
     br_skel_path = './data/br_skel'
-    # save_weight_break(data_root, pred2_path, BR_weight_path, br_skel_path,file_path)
+    save_weight_break(data_root, pred2_path, BR_weight_path, br_skel_path,file_path)
 
     ###################################### TRAIN_STAGE_3
     start_model = './saved_model/stage_two/'
