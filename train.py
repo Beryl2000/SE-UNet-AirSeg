@@ -138,6 +138,7 @@ def save_data_online3(path, image, label, weight, skel,names, limits=1500):
             np.save(os.path.join(path, 'skel', names[i]), skel[i].astype(np.int8))
 
 def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,br_skel_path,BR_weight_path,aug, DTI,start_model, start_epoch, file_path, file_root, gpu):
+    stage=3
     max_epoches = 50
     batch_size =8
     aug_flag = aug  
@@ -304,8 +305,7 @@ def train3(data_root, model_savepath, online_savepath, log_savepath, pred2_path,
         lr_scheduler.step()
         # '''
         print('')
-        TD_mean, BD_mean, loss_random, loss_hard=validation(data_root, model, valid_dataloader, ep, log_savepath, DTI,
-                   file_root)
+        TD_mean, BD_mean, loss_random, loss_hard=validation(data_root, model, valid_dataloader, ep, log_savepath, DTI,file_root,stage)
         print('')
 
         val_td_list.append(TD_mean)
@@ -337,6 +337,7 @@ def train2(data_root,
            file_path,
            file_root,
            gpu='0'):
+    stage=2
     max_epoches = 50
     batch_size =8
     aug_flag = aug  
@@ -492,7 +493,7 @@ def train2(data_root,
         lr_scheduler.step()
 
         print('')
-        TD_mean, BD_mean, loss_random, loss_hard=validation(data_root,model, valid_dataloader, ep, log_savepath, DTI, file_root)
+        TD_mean, BD_mean, loss_random, loss_hard=validation(data_root,model, valid_dataloader, ep, log_savepath, DTI, file_root,stage)
         print('')
 
         val_td_list.append(TD_mean)
@@ -520,6 +521,7 @@ def train(data_root,model_savepath,
           file_root,
           gpu='0'
           ):
+    stage=1
     max_epoches = 100
     batch_size =8
     aug_flag = aug  
@@ -614,8 +616,7 @@ def train(data_root,model_savepath,
 
         print('')
         if ep == max_epoches-1:
-            TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, ep, log_savepath, DTI,
-                       file_root)
+            TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, ep, log_savepath, DTI,file_root,stage)
         print('')
         torch.cuda.empty_cache()
 
@@ -627,7 +628,7 @@ def train(data_root,model_savepath,
         # print(ep, ':', time.time() - starttime)
     return max_epoches
 
-def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_root):
+def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_root,stage):
     model.train()
     TDs,BDs,DSCs,Pres,Sens,Spes = [], [], [], [],[], []
     val_losses_random, val_losses_hard = [], []
@@ -650,12 +651,12 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
                         pred=double_threshold_iteration(pred,h_thresh,l_thresh)
 
                                 
+                    if stage!=1:
+                        hard_pred = pred * (1 - pred1)
+                        hard_label= label * (1 - pred1)
 
-                    hard_pred = pred * (1 - pred1)
-                    hard_label= label * (1 - pred1)
-
-                    val_losses_random.append(2 * (pred * label).sum() / (pred + label).sum())
-                    val_losses_hard.append(2 * (hard_pred * hard_label).sum() / (hard_pred + hard_label).sum())
+                        val_losses_random.append(2 * (pred * label).sum() / (pred + label).sum())
+                        val_losses_hard.append(2 * (hard_pred * hard_label).sum() / (hard_pred + hard_label).sum())
 
                     
                     TD,BD,DSC,Pre,Sen,Spe= evaluation_case(pred, label, last_name,file_root)
@@ -669,8 +670,9 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
                 label = sitk.ReadImage(data_root+'/mask/'+name+ 'mask_cut' + '.nii.gz')
                 label = sitk.GetArrayFromImage(label)
 
-                pred1 = nibabel.load( os.path.join(file_root, 'pred_1',name + '.nii.gz'))
-                pred1 = pred1.get_fdata()[0]
+                if stage!=1:
+                    pred1 = nibabel.load( os.path.join(file_root, 'pred_1',name + '.nii.gz'))
+                    pred1 = pred1.get_fdata()[0]
 
                 pred = np.zeros(label.shape)
                 pred = pred[np.newaxis, np.newaxis, ...]
@@ -696,12 +698,12 @@ def validation(data_root,model, valid_dataloader, epoch,log_savepath,DTI,file_ro
         else:
             pred=double_threshold_iteration(pred,h_thresh,l_thresh)
 
+        if stage!=1:
+            hard_pred = pred * (1 - pred1)
+            hard_label= label * (1 - pred1)
 
-        hard_pred = pred * (1 - pred1)
-        hard_label= label * (1 - pred1)
-
-        val_losses_random.append(2 * (pred * label).sum() / (pred + label).sum())
-        val_losses_hard.append(2 * (hard_pred * hard_label).sum() / (hard_pred + hard_label).sum())
+            val_losses_random.append(2 * (pred * label).sum() / (pred + label).sum())
+            val_losses_hard.append(2 * (hard_pred * hard_label).sum() / (hard_pred + hard_label).sum())
 
 
         TD,BD,DSC,Pre,Sen,Spe= evaluation_case(pred, label, last_name,file_root)
@@ -839,7 +841,7 @@ def dtival(model_savepath,log_savepath,data_root,file_path,file_root,dtiep,gpu='
     starttime=time.time()
     print('')
     DTI=1
-    TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, dtiep,log_savepath,DTI,file_root)
+    TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, dtiep,log_savepath,DTI,file_root,stage=2)
     # print((time.time()-starttime)/60,'mins')
     torch.cuda.empty_cache()
 
