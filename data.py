@@ -270,9 +270,9 @@ class AirwayHMData(Dataset):
         self.aug_flag = aug_flag
 
 
-        # Random : Hard = 7 : 3
-        self.random_ratio = 0.7
-        self.hard_ratio = 0.3
+        # Random : Hard = 6 : 4
+        self.random_ratio = 0.6
+        self.hard_ratio = 0.4
 
         # scheduler 
         self.decay_step = 5          
@@ -421,7 +421,7 @@ class AirwayHMData3(Dataset):
 
         self.hard_ratio = 0.8      
         self.break_ratio = 0.625   
-        self.min_hard_ratio = 0.1
+        self.min_hard_ratio = 0.5
         self.max_hard_ratio = 0.9
         self.min_break_ratio = 0.2
         self.max_break_ratio = 0.8

@@ -824,7 +824,7 @@ def valid(log_path):
     print('第',SCORE.index(max(SCORE)),'个epoch验证效果最佳，分数为',max(SCORE))
     return SCORE.index(max(SCORE))
 
-def dtival(model_savepath,log_savepath,data_root,file_path,file_root,dtiep,gpu='0'):
+def dtival(model_savepath,log_savepath,data_root,file_path,file_root,dtiep,gpu='0',stage=0):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
 
     model = SE_UNet(in_channel=2, n_classes=1)
@@ -841,7 +841,7 @@ def dtival(model_savepath,log_savepath,data_root,file_path,file_root,dtiep,gpu='
     starttime=time.time()
     print('')
     DTI=1
-    TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, dtiep,log_savepath,DTI,file_root,stage=2)
+    TD_mean, BD_mean, val_loss_random, val_loss_hard=validation(data_root,model, valid_dataloader, dtiep,log_savepath,DTI,file_root,stage)
     # print((time.time()-starttime)/60,'mins')
     torch.cuda.empty_cache()
 
@@ -911,8 +911,8 @@ if __name__ == '__main__':
     
     ###### DTI
     best_epoch = valid_recall( './LOG/log_stage_two.txt')
-    dtival( './saved_model/stage_two', './LOG/log_stage_two.txt',data_root,file_path,file_root,best_epoch,gpu)
+    dtival( './saved_model/stage_two', './LOG/log_stage_two.txt',data_root,file_path,file_root,best_epoch,gpu,stage=2)
 
     best_epoch = valid( './LOG/log_stage_three.txt')
-    dtival('./saved_model/stage_three', './LOG/log_stage_three.txt',data_root,file_path,file_root,best_epoch,gpu)
+    dtival('./saved_model/stage_three', './LOG/log_stage_three.txt',data_root,file_path,file_root,best_epoch,gpu,stage=3)
 
