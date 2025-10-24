@@ -819,7 +819,7 @@ def valid(log_path):
         DSC.append(float(re.findall(r'DSC: (.*?) ', l)[0]))
         Pre.append(float(re.findall(r'Pre: (.*?) ', l)[0]))
     for l in range(len(TD)):
-        SCORE.append((TD[l]+BD[l]+DSC[l]+Pre[l])/4)
+        SCORE.append(TD[l]*0.3+BD[l]*0.3+DSC[l]*0.2+Pre[l]*0.2)
 
     print('第',SCORE.index(max(SCORE)),'个epoch验证效果最佳，分数为',max(SCORE))
     return SCORE.index(max(SCORE))
