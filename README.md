@@ -86,6 +86,10 @@ Required packages include: `torch`, `numpy`, `scipy`, `SimpleITK`, `scikit-image
    python prediction.py
    ```
    Deploy trained models for clinical inference.
+   
+9. **Download Pretrained Model**
+
+   [📥 Pretrained SE_UNet (OneDrive)](https://1drv.ms/u/c/3e70577908ec5d62/IQBh5BxhAvYyT4HSItEUC_dLASxdqp4iM1xZEh1L9_AX9nk?e=DOhjRI)
 
 ---
 
@@ -147,14 +151,15 @@ It is evident that the airway tree parsing method from the ATM22 challenge is no
 If you use this project in your research, please cite the following papers:
 
 ```bibtex
-@misc{yang2025progressivecurriculumlearningscaleenhanced,
-      title={Progressive Curriculum Learning with Scale-Enhanced U-Net for Continuous Airway Segmentation}, 
-      author={Bingyu Yang and Qingyao Tian and Huai Liao and Xinyan Huang and Jinlin Wu and Jingdi Hu and Hongbin Liu},
-      year={2025},
-      eprint={2410.18456},
-      archivePrefix={arXiv},
-      primaryClass={eess.IV},
-      url={https://arxiv.org/abs/2410.18456}, 
+@article{yang2026progressive,
+  title={Progressive curriculum learning with Scale-Enhanced U-Net for continuous airway segmentation},
+  author={Yang, Bingyu and Tian, Qingyao and Liao, Huai and Huang, Xinyan and Wu, Jinlin and Hu, Jingdi and Liu, Hongbin},
+  journal={BMC Medical Imaging},
+  volume={26},
+  number={1},
+  pages={43},
+  year={2026},
+  publisher={Springer}
 }
 
 @article{zhang2023multi,
